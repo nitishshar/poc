@@ -163,7 +163,7 @@ def join_api_url(base_url, path):
 # Initialize ResponseAnalyzer
 response_analyzer = ResponseAnalyzer()
 
-
+@st.cache_data(ttl=300)  # Cache for 5 minutes
 def format_datetime(dt_str):
     """Format datetime string to human-readable format."""
     try:
@@ -172,7 +172,7 @@ def format_datetime(dt_str):
     except:
         return dt_str
 
-
+@st.cache_data(ttl=60)  # Cache for 1 minute
 def get_chat_sessions():
     """Get all chat sessions from the API."""
     try:
@@ -183,7 +183,7 @@ def get_chat_sessions():
         st.error(f"Error fetching chat sessions: {str(e)}")
         return []
 
-
+@st.cache_data(ttl=60)  # Cache for 1 minute
 def get_chat_session(session_id):
     """Get a chat session by ID."""
     try:
@@ -218,8 +218,7 @@ def get_chat_session(session_id):
         print(f"Exception in get_chat_session: {str(e)}")
         return None
 
-
-def create_chat_session(document_id=None, document_ids=None, name=None, chat_mode="completion"):
+def create_chat_session(document_id=None, document_ids=None, name=None, chat_mode="completion", llm_provider=None, llm_model=None):
     """Create a new chat session."""
     try:
         payload = {}
@@ -231,6 +230,10 @@ def create_chat_session(document_id=None, document_ids=None, name=None, chat_mod
             payload["name"] = name
         if chat_mode:
             payload["chat_mode"] = chat_mode
+        if llm_provider:
+            payload["llm_provider"] = llm_provider
+        if llm_model:
+            payload["llm_model"] = llm_model
         
         # Log the request for debugging
         print(f"Creating chat session with payload: {payload}")
@@ -255,7 +258,11 @@ def create_chat_session(document_id=None, document_ids=None, name=None, chat_mod
         print(f"Response content: {response.text[:500]}...")
         
         if response.status_code == 200 or response.status_code == 201:
-            return response.json()
+            result = response.json()
+            # Clear the chat sessions cache to force refresh
+            get_chat_sessions.clear()
+            get_chat_session.clear()
+            return result
         else:
             error_msg = f"Failed to create chat session. Server returned: {response.status_code} - {response.text}"
             st.error(error_msg)
@@ -277,7 +284,6 @@ def create_chat_session(document_id=None, document_ids=None, name=None, chat_mod
         print(error_msg)
         return None
 
-
 def delete_chat_session(session_id):
     """Delete a chat session."""
     try:
@@ -285,11 +291,12 @@ def delete_chat_session(session_id):
         formatted_id = format_uuid_if_needed(session_id)
         response = requests.delete(join_api_url(API_BASE_URL, f"/chat/sessions/{formatted_id}"))
         response.raise_for_status()
+        # Clear the chat sessions cache to force refresh
+        get_chat_sessions.clear()
         return True
     except Exception as e:
         st.error(f"Error deleting chat session: {str(e)}")
         return False
-
 
 def send_message(session_id, message, context_window=5):
     """Send a message to a chat session."""
@@ -340,6 +347,8 @@ def send_message(session_id, message, context_window=5):
                     response.raise_for_status()
                     
                 # If we reach here, the request was successful
+                # Clear the session cache to get the updated session
+                get_chat_session.clear()
                 return response.json()
                 
             except requests.Timeout:
@@ -368,40 +377,19 @@ def send_message(session_id, message, context_window=5):
         print(traceback.format_exc())
         return None
 
-
+@st.cache_data(ttl=settings.DOCUMENT_CACHE_TTL)
 def get_documents():
     """Get all documents from the API."""
-    # Use session state to cache documents and reduce API calls
-    cache_key = "documents_cache"
-    cache_timestamp = "documents_timestamp"
-    cache_ttl = 30  # seconds
-    
-    # Check if we need to refresh the cache
-    current_time = time.time()
-    if (cache_key not in st.session_state or 
-        cache_timestamp not in st.session_state or 
-        current_time - st.session_state[cache_timestamp] > cache_ttl):
-        
-        try:
-            url = join_api_url(API_BASE_URL, "/documents")
-            response = requests.get(url, timeout=3)
-            response.raise_for_status()
-            
-            # Store in cache
-            st.session_state[cache_key] = response.json()
-            st.session_state[cache_timestamp] = current_time
-            return st.session_state[cache_key]
-        except Exception as e:
-            print(f"Error fetching documents: {str(e)}")
-            if cache_key in st.session_state:
-                # Return stale cache if available
-                return st.session_state[cache_key]
-            return []
-    else:
-        # Return cached documents
-        return st.session_state[cache_key]
+    try:
+        url = join_api_url(API_BASE_URL, "/documents")
+        response = requests.get(url, timeout=3)
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        print(f"Error fetching documents: {str(e)}")
+        return []
 
-
+@st.cache_data
 def visualize_response(query, response_text, metadata=None):
     """
     Visualize the response based on its content type.
@@ -498,7 +486,7 @@ def visualize_response(query, response_text, metadata=None):
         # For other types, just display the text
         st.markdown(response_text)
 
-
+@st.cache_data
 def visualize_search_results(results):
     """
     Visualize search results from document embeddings.
@@ -553,55 +541,7 @@ def visualize_search_results(results):
                 
                 st.markdown(meta_text)
 
-
-def test_chat_api():
-    """Test if the chat API endpoints are available."""
-    results = {}
-    
-    try:
-        # Test chat sessions endpoint with a short timeout
-        sessions_url = join_api_url(API_BASE_URL, "/chat/sessions")
-        sessions_response = requests.get(sessions_url, timeout=1)
-        results["sessions_status"] = sessions_response.status_code
-        results["sessions_ok"] = sessions_response.status_code == 200
-        return results
-    except Exception as e:
-        return {"error": str(e), "available": False}
-
-
-def test_create_chat_session():
-    """Test function to directly create a chat session with minimal parameters."""
-    st.header("Test Chat Session Creation")
-    
-    with st.form("test_create_chat"):
-        test_name = st.text_input("Test Chat Name", value="Test Chat")
-        chat_mode_test = st.selectbox("Chat Mode", options=["completion", "assistant"])
-        test_submit = st.form_submit_button("Create Test Session")
-        
-        if test_submit:
-            try:
-                # Create the simplest possible payload
-                test_payload = {"name": test_name, "chat_mode": chat_mode_test}
-                
-                # Make direct request
-                url = join_api_url(API_BASE_URL, "/chat/sessions")
-                st.write(f"Sending test request to: {url}")
-                st.write(f"Test payload: {test_payload}")
-                
-                response = requests.post(url, json=test_payload)
-                st.write(f"Response status: {response.status_code}")
-                st.write(f"Response headers: {dict(response.headers)}")
-                st.write(f"Response content: {response.text}")
-                
-                if response.status_code in [200, 201]:
-                    st.success("Test session created successfully!")
-                else:
-                    st.error(f"Test session creation failed with status {response.status_code}")
-            except Exception as e:
-                st.error(f"Test error: {str(e)}")
-                st.exception(e)
-
-
+@st.cache_data
 def is_valid_uuid(val):
     """Check if string is a valid UUID."""
     if not val:  # Handle None or empty string
@@ -615,7 +555,7 @@ def is_valid_uuid(val):
     except (ValueError, AttributeError, TypeError):
         return False
 
-
+@st.cache_data
 def format_uuid_if_needed(val):
     """Format a string to ensure it's a valid UUID string format."""
     if not val:
@@ -632,467 +572,310 @@ def format_uuid_if_needed(val):
     except (ValueError, AttributeError, TypeError):
         return val  # Return original if not convertible
 
+# WebSocket Helper Functions
+def get_ws_url(session_id):
+    """Get WebSocket URL for a chat session."""
+    # Derive WebSocket URL from API_BASE_URL (replacing http with ws)
+    base_url = API_BASE_URL.replace("http://", "ws://").replace("https://", "wss://")
+    return f"{base_url}/chat/ws/{session_id}"
 
-def create_direct_chat_session(key_prefix="topbar"):
-    """Create a chat session directly, with a simpler approach.
+async def connect_websocket(session_id):
+    """Connect to WebSocket for a chat session."""
+    ws_url = get_ws_url(session_id)
+    try:
+        connection = await websockets.connect(ws_url)
+        # Store session data
+        if session_id not in st.session_state.ws_messages:
+            st.session_state.ws_messages[session_id] = []
+        return connection
+    except Exception as e:
+        print(f"Error connecting to WebSocket: {str(e)}")
+        # Remove the debug check since settings.DEBUG doesn't exist
+        # Use an info message which is less intrusive
+        st.info("Using standard API instead of real-time connection.")
+        return None
+
+async def send_message_ws(websocket, message, context_window=5):
+    """Send a message via WebSocket."""
+    if not websocket:
+        return None
+        
+    try:
+        # Prepare message data
+        data = {
+            "message": message,
+            "context_window": context_window
+        }
+        
+        # Send the message
+        await websocket.send(json.dumps(data))
+        
+        # Wait for and process responses
+        while True:
+            try:
+                response = await asyncio.wait_for(websocket.recv(), timeout=0.1)
+                data = json.loads(response)
+                
+                # Store the message in session state for display
+                if data.get("type") == "message" and data.get("status") == "complete":
+                    st.session_state.ws_messages[websocket.path.split("/")[-1]].append(data["message"])
+                    return data["message"]
+                    
+                # Update session data if provided
+                if data.get("type") == "session_data":
+                    st.session_state.current_session_cache = data["data"]
+                    
+                # Handle errors
+                if data.get("type") == "error":
+                    st.error(f"Error: {data.get('error')}")
+                    return None
+                    
+            except asyncio.TimeoutError:
+                # No message received, continue listening
+                await asyncio.sleep(0.1)
+                continue
+                
+    except Exception as e:
+        print(f"Error sending message via WebSocket: {str(e)}")
+        # Use a warning instead of an error for a less intrusive notification
+        st.warning("Real-time connection unavailable. Using standard API instead.")
+        return None
+
+def ws_send_message(session_id, message, context_window=5):
+    """Send a message using WebSocket or fallback to REST API."""
+    # Check if we have websocket support enabled
+    if settings.USE_WEBSOCKET_CHAT:
+        # Try using WebSocket
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            # Connect if not connected
+            if "ws_connection" not in st.session_state or not st.session_state.ws_connection:
+                st.session_state.ws_connection = loop.run_until_complete(connect_websocket(session_id))
+            
+            # Send message if connected
+            if st.session_state.ws_connection:
+                result = loop.run_until_complete(send_message_ws(
+                    st.session_state.ws_connection, 
+                    message, 
+                    context_window
+                ))
+                
+                if result:
+                    return {"success": True, "message": result}
+            
+        except Exception as e:
+            print(f"WebSocket error: {str(e)}")
+            # Remove the debug check since settings.DEBUG doesn't exist
+            # No need to show a message here as the connection_websocket function will handle it
+            # Close websocket if open
+            if "ws_connection" in st.session_state and st.session_state.ws_connection:
+                try:
+                    loop.run_until_complete(st.session_state.ws_connection.close())
+                except:
+                    pass
+                st.session_state.ws_connection = None
     
-    Args:
-        key_prefix: A prefix to use for all Streamlit widget keys to avoid key conflicts
-    """
-    st.subheader("Create New Chat Session")
+    # Fallback to REST API
+    response = send_message(session_id, message, context_window)
     
-    # Simple inputs for a more direct approach - use key_prefix to make keys unique
-    direct_name = st.text_input("Session Name", value="Quick Chat", key=f"{key_prefix}_direct_name")
+    if response:
+        # Get the assistant's response from updated messages
+        messages = response.get("messages", [])
+        if messages and messages[-1]["role"] == "assistant":
+            return {"success": True, "message": messages[-1]}
     
-    # LLM provider selection
-    provider_options = [(key, data["display_name"]) for key, data in LLM_PROVIDERS.items()]
+    return {"success": False, "error": "Failed to send message"}
+
+def create_direct_chat_session(key_prefix=""):
+    """Creates a new chat session with a simple interface."""
+    # Create a placeholder for success message
+    status_placeholder = st.empty()
     
-    selected_provider = st.selectbox(
-        "LLM Provider",
-        options=provider_options,
-        format_func=lambda x: x[1],
-        key=f"{key_prefix}_provider_select",
-        index=0
-    )[0]
+    # Get available documents for selection
+    documents = get_documents()
     
-    # Model selection based on provider
-    available_models = LLM_PROVIDERS[selected_provider]["models"]
-    selected_model = st.selectbox(
-        "Model",
-        options=available_models,
-        key=f"{key_prefix}_model_select",
-        index=0
+    # Check if we have any documents
+    if not documents:
+        st.warning("No documents available. Please upload documents first.")
+        return
+    
+    # Session name
+    session_name = st.text_input(
+        "Session Name",
+        key=f"{key_prefix}_session_name",
+        placeholder="My Chat Session"
     )
     
-    # Add tooltip to explain the provider options
-    st.info(f"""
-    Selected provider: **{LLM_PROVIDERS[selected_provider]['display_name']}** with model **{selected_model}**
+    # Document selection - multi-select if enabled
+    # Create safer document options that handle missing keys
+    doc_options = []
     
-    You can change the API keys in the environment variables or settings page.
-    """)
+    # Debug the document structure for diagnosis
+    print("DEBUG: Document structure check:")
+    for i, doc in enumerate(documents):
+        doc_str = str({k: v for k, v in doc.items() if k in ['id', 'name', 'title', 'filename', 'pages', 'file_size']})
+        print(f"Document {i}: {doc_str}")
     
-    # Update the chat mode radio to make it clearer these are OpenAI options
-    direct_mode = st.radio(
-        "API Mode",
-        options=[
-            ("completion", "Chat Completions API"),
-            ("assistant", "Assistant API")
-        ],
-        format_func=lambda x: x[1],
-        horizontal=True,
-        key=f"{key_prefix}_direct_mode",
-        index=0 if settings.CHAT_MODE == "completion" else 1
-    )[0]
-    
-    # Add tooltip to explain the difference
-    st.info("""
-    **API Mode Explanation**:
-    - **Chat Completions API**: Standard chat completions with direct access to your documents.
-    - **Assistant API**: Uses OpenAI's Assistant API with additional features but may process differently.
-    """)
-    
-    # Get documents for a simple dropdown
-    with st.spinner("Loading documents..."):
-        documents = get_documents()
-    
-    doc_options = [(doc["id"], doc["original_filename"]) for doc in documents if doc["status"] == "processed"]
-    
-    # Multi-document selection
-    if doc_options:
-        st.write(f"Available documents: {len(doc_options)}")
+    for doc in documents:
+        doc_id = doc.get("id", "unknown_id")
         
-        # For multi-document support
-        selected_docs = []
+        # Extract title from metadata if available
+        metadata = doc.get("metadata", {})
+        doc_title = metadata.get("title") if metadata else None
         
-        # Use a more efficient selection method - multiselect
-        if settings.ENABLE_MULTI_DOCUMENT_CHAT:
-            # Create a dictionary with user-friendly names as keys and actual IDs as values
-            doc_display = {}
-            for doc_id, doc_name in doc_options:
-                # Truncate very long filenames for better display
-                short_name = doc_name if len(doc_name) < 40 else doc_name[:37] + "..."
-                # Create a unique key for each document
-                doc_display[f"{short_name}"] = doc_id
+        # If no title in metadata, try other possible locations or keys
+        if not doc_title:
+            doc_title = doc.get("title", "")  # Try direct title property
             
-            # Use multiselect for efficient multiple selection with unique key
-            # Convert to list to ensure we have a stable order for the options
-            doc_options_list = list(doc_display.keys())
-            selected_doc_names = st.multiselect(
-                "Select Documents (Multiple)",
-                options=doc_options_list,
-                key=f"{key_prefix}_multi_docs_select"
-            )
+        # If still no title, use original_filename or filename
+        if not doc_title:
+            doc_title = doc.get("original_filename", "")
+        if not doc_title:
+            doc_title = doc.get("filename", "").split('/')[-1] if doc.get("filename") else "Untitled Document"
+        
+        # Display document info with size or page count
+        page_count = None
+        if "page_count" in metadata:
+            page_count = metadata.get("page_count")
+        elif "pages" in doc:
+            page_count = doc.get("pages")
             
-            # Convert selected names back to document IDs
-            for name in selected_doc_names:
-                selected_docs.append(doc_display[name])
-            
-            # Handle maximum document limit
-            max_docs = settings.MAX_DOCUMENTS_PER_CHAT
-            if len(selected_docs) > max_docs:
-                st.warning(f"Maximum {max_docs} documents allowed. Only the first {max_docs} will be used.")
-                selected_docs = selected_docs[:max_docs]
-                
-            st.write(f"Selected {len(selected_docs)} documents")
+        if page_count:
+            doc_info = f"{doc_title} ({page_count} pages)"
+        elif "file_size" in doc:
+            # Convert bytes to KB/MB if available
+            size_bytes = doc["file_size"]
+            if size_bytes < 1024:
+                size_str = f"{size_bytes} bytes"
+            elif size_bytes < 1024 * 1024:
+                size_str = f"{size_bytes / 1024:.1f} KB"
+            else:
+                size_str = f"{size_bytes / (1024 * 1024):.1f} MB"
+            doc_info = f"{doc_title} ({size_str})"
         else:
-            # Single document selection with unique key
-            doc_dict = {"None": None}
-            for doc_id, doc_name in doc_options:
-                # Truncate very long filenames for better display
-                short_name = doc_name if len(doc_name) < 40 else doc_name[:37] + "..."
-                doc_dict[f"{short_name}"] = doc_id
-            
-            selected_doc_name = st.selectbox(
-                "Select a Document (Optional)", 
-                options=list(doc_dict.keys()),
-                key=f"{key_prefix}_doc_select"
-            )
-            doc_id = doc_dict[selected_doc_name]
-            
-            if doc_id:
-                selected_docs = [doc_id]
+            doc_info = doc_title
+        
+        doc_options.append((doc_id, doc_info))
+    
+    # Print document structure for debugging
+    print(f"Document structure sample (first doc): {documents[0] if documents else 'No documents'}")
+    
+    if settings.ENABLE_MULTI_DOCUMENT_CHAT:
+        selected_docs = st.multiselect(
+            "Select Documents",
+            options=[doc[0] for doc in doc_options],
+            format_func=lambda x: next((doc[1] for doc in doc_options if doc[0] == x), x),
+            key=f"{key_prefix}_multi_docs"
+        )
     else:
-        st.warning("No processed documents available")
-        selected_docs = []
+        selected_doc = st.selectbox(
+            "Select Document",
+            options=[""] + [doc[0] for doc in doc_options],
+            format_func=lambda x: next((doc[1] for doc in doc_options if doc[0] == x), x if x else "None"),
+            key=f"{key_prefix}_single_doc"
+        )
+        selected_docs = [selected_doc] if selected_doc else []
     
-    # Create the chat session with unique button key
-    if st.button(
-        "Create Chat Now", 
-        key=f"{key_prefix}_direct_create", 
-        use_container_width=True
-    ):
-        create_placeholder = st.empty()
-        with st.spinner("Creating chat session..."):
-            try:
-                # Build a minimal payload
-                payload = {
-                    "name": direct_name,
-                    "chat_mode": direct_mode,
-                    "llm_provider": selected_provider,
-                    "llm_model": selected_model
-                }
-                
-                # Format document IDs 
-                formatted_docs = []
-                for doc_id in selected_docs:
-                    if is_valid_uuid(doc_id):
-                        formatted_docs.append(format_uuid_if_needed(doc_id))
-                
-                # Add document info based on selection
-                if len(formatted_docs) == 1:
-                    payload["document_id"] = formatted_docs[0]
-                elif len(formatted_docs) > 1:
-                    payload["document_ids"] = formatted_docs
-                
-                # Make the API request
-                url = join_api_url(API_BASE_URL, "/chat/sessions")
-                response = requests.post(url, json=payload, timeout=10)
-                
-                if response.status_code in [200, 201]:
-                    result = response.json()
-                    create_placeholder.success("Chat session created successfully!")
-                    
-                    # Update session state
-                    st.session_state.chat_sessions = get_chat_sessions()
-                    st.session_state.current_session_id = result.get('id')
-                    if "current_session_cache" in st.session_state:
-                        del st.session_state.current_session_cache
-                    
-                    # Hide the create form and set a flag to show chat immediately
-                    st.session_state.show_new_chat_form = False
-                    st.session_state.newly_created_session = True
-                    
-                    # Force a rerun to show the chat interface with the new session
-                    st.rerun()
-                else:
-                    create_placeholder.error(f"Failed to create chat session: {response.status_code}")
-                    st.code(response.text)
-            except Exception as e:
-                create_placeholder.error(f"Error: {str(e)}")
-                import traceback
-                st.code(traceback.format_exc())
-
-
-def debug_uuid_format(uuid_str):
-    """Debug and check a UUID string format."""
-    try:
-        # Check original string
-        st.write(f"Original UUID: {uuid_str}")
-        st.write(f"Length: {len(uuid_str)}")
-        st.write(f"Contains dashes: {'Yes' if '-' in uuid_str else 'No'}")
-        
-        # Try different formats
-        clean_uuid = uuid_str.replace('-', '')
-        formatted_uuid = str(uuid.UUID(clean_uuid))
-        st.write(f"Reformatted UUID: {formatted_uuid}")
-        
-        # Test API access with both formats
-        original_url = join_api_url(API_BASE_URL, f"/chat/sessions/{uuid_str}")
-        formatted_url = join_api_url(API_BASE_URL, f"/chat/sessions/{formatted_uuid}")
-        
-        # Try original
-        st.write("Testing original format:")
-        try:
-            original_response = requests.get(original_url, timeout=5)
-            st.write(f"Status: {original_response.status_code}")
-            if original_response.status_code == 200:
-                st.success("Original format works!")
-            else:
-                st.error("Original format failed")
-        except Exception as e:
-            st.error(f"Error with original format: {str(e)}")
-        
-        # Try formatted
-        st.write("Testing reformatted UUID:")
-        try:
-            formatted_response = requests.get(formatted_url, timeout=5)
-            st.write(f"Status: {formatted_response.status_code}")
-            if formatted_response.status_code == 200:
-                st.success("Reformatted UUID works!")
-            else:
-                st.error("Reformatted UUID failed")
-        except Exception as e:
-            st.error(f"Error with reformatted UUID: {str(e)}")
-            
-        return formatted_uuid
-    except Exception as e:
-        st.error(f"Error processing UUID: {str(e)}")
-        return uuid_str
-
-
-def diagnose_endpoints():
-    """Directly check key API endpoints and display raw responses."""
-    st.header("API Endpoint Diagnostics")
+    # Model selection
+    provider_col, model_col = st.columns(2)
     
-    # Add Document Inspector
-    st.subheader("Document Inspector")
-    doc_id_input = st.text_input(
-        "Enter Document ID to inspect", 
-        value="917d257b-7be1-43ee-9ddb-1d9a6ce7746f"
+    with provider_col:
+        provider_options = [(key, info["display_name"]) for key, info in LLM_PROVIDERS.items()]
+        selected_provider = st.selectbox(
+            "LLM Provider",
+            options=[p[0] for p in provider_options],
+            format_func=lambda x: next((p[1] for p in provider_options if p[0] == x), x),
+            index=[i for i, p in enumerate(provider_options) if p[0] == settings.DEFAULT_LLM_PROVIDER][0] if settings.DEFAULT_LLM_PROVIDER else 0,
+            key=f"{key_prefix}_provider"
+        )
+    
+    with model_col:
+        # Get models for selected provider
+        available_models = LLM_PROVIDERS[selected_provider]["models"] if selected_provider in LLM_PROVIDERS else []
+        default_model = settings.DEFAULT_LLM_MODEL if settings.DEFAULT_LLM_MODEL in available_models else (available_models[0] if available_models else "")
+        
+        selected_model = st.selectbox(
+            "LLM Model",
+            options=available_models,
+            index=available_models.index(default_model) if default_model in available_models else 0,
+            key=f"{key_prefix}_model"
+        )
+    
+    # Chat mode
+    chat_mode = st.selectbox(
+        "Chat Mode",
+        options=["completion", "assistant"],
+        index=0 if settings.CHAT_MODE == "completion" else 1,
+        key=f"{key_prefix}_chat_mode"
     )
     
-    if st.button("Inspect Document"):
-        if not doc_id_input:
-            st.error("Please enter a document ID")
+    # Create session button
+    if st.button("Create Chat Session", key=f"{key_prefix}_create_btn", use_container_width=True):
+        if not selected_docs:
+            st.warning("Please select at least one document.")
+            return
+        
+        if not session_name:
+            # Generate a name based on the document title
+            if len(selected_docs) == 1:
+                doc_info = next((doc for doc in documents if doc["id"] == selected_docs[0]), None)
+                print(f"DEBUG: Selected document for naming: {selected_docs[0]}")
+                if doc_info:
+                    print(f"DEBUG: Document structure for naming: {str({k: v for k, v in doc_info.items() if k in ['id', 'metadata', 'original_filename', 'filename', 'pages', 'file_size']})}")
+                    
+                    # Extract title from metadata if available
+                    metadata = doc_info.get("metadata", {})
+                    doc_title = metadata.get("title") if metadata else None
+                    
+                    # If no title in metadata, try other possible locations or keys
+                    if not doc_title:
+                        doc_title = doc_info.get("title", "")  # Try direct title property
+                        
+                    # If still no title, use original_filename or filename
+                    if not doc_title:
+                        doc_title = doc_info.get("original_filename", "")
+                    if not doc_title:
+                        doc_title = doc_info.get("filename", "").split('/')[-1] if doc_info.get("filename") else "Document"
+                    
+                    print(f"DEBUG: Using document title: {doc_title}")
+                    session_name = f"Chat with {doc_title}"
+                else:
+                    print(f"DEBUG: No matching document found for ID: {selected_docs[0]}")
+                    session_name = "New Chat Session"
+            else:
+                session_name = f"Multi-document Chat ({len(selected_docs)} docs)"
+        
+        # Display creating message
+        status_placeholder.info("Creating chat session...")
+        
+        # Create the session
+        result = create_chat_session(
+            document_ids=selected_docs,
+            name=session_name,
+            chat_mode=chat_mode,
+            llm_provider=selected_provider,
+            llm_model=selected_model
+        )
+        
+        if result:
+            # Show success
+            status_placeholder.success("Chat session created successfully!")
+            
+            # Set session as current and hide the form
+            st.session_state.current_session_id = result["id"]
+            st.session_state.newly_created_session = True
+            st.session_state.show_new_chat_form = False
+            
+            # Clear any existing cache for this session
+            if "current_session_cache" in st.session_state:
+                del st.session_state.current_session_cache
+            
+            # Force a rerun to show the chat immediately
+            st.rerun()
         else:
-            st.write(f"Inspecting document: {doc_id_input}")
-            # Format the ID
-            formatted_id = format_uuid_if_needed(doc_id_input)
-            if formatted_id != doc_id_input:
-                st.info(f"Reformatted ID: {formatted_id}")
-            
-            # Try to fetch the document
-            try:
-                url = join_api_url(API_BASE_URL, f"/documents/{formatted_id}")
-                st.write(f"Requesting: {url}")
-                
-                response = requests.get(url, timeout=5)
-                st.write(f"Status code: {response.status_code}")
-                
-                if response.status_code == 200:
-                    doc_data = response.json()
-                    st.success("Document found!")
-                    
-                    # Display document info
-                    st.json(doc_data)
-                    
-                    # Create a chat session with this document
-                    if st.button("Create Chat with This Document"):
-                        create_payload = {
-                            "name": f"Chat with {doc_data.get('original_filename', 'Document')}",
-                            "document_id": formatted_id,
-                            "chat_mode": "completion"
-                        }
-                        
-                        create_url = join_api_url(API_BASE_URL, "/chat/sessions")
-                        create_response = requests.post(create_url, json=create_payload, timeout=5)
-                        
-                        if create_response.status_code in [200, 201]:
-                            session_data = create_response.json()
-                            st.success(f"Chat session created! ID: {session_data.get('id')}")
-                            st.session_state.chat_sessions = get_chat_sessions()
-                            st.session_state.current_session_id = session_data.get('id')
-                            if "current_session_cache" in st.session_state:
-                                del st.session_state.current_session_cache
-                        else:
-                            st.error(f"Failed to create chat session: {create_response.status_code}")
-                            st.code(create_response.text)
-                else:
-                    st.error(f"Could not find document. Status: {response.status_code}")
-                    
-                    # Try without formatting as a fallback
-                    fallback_url = join_api_url(API_BASE_URL, f"/documents/{doc_id_input}")
-                    st.write(f"Trying fallback with original ID: {fallback_url}")
-                    fallback_response = requests.get(fallback_url, timeout=5)
-                    
-                    if fallback_response.status_code == 200:
-                        st.success("Document found with original ID format!")
-                        fallback_data = fallback_response.json()
-                        st.json(fallback_data)
-                    else:
-                        st.error(f"Fallback also failed: {fallback_response.status_code}")
-            except Exception as e:
-                st.error(f"Error fetching document: {str(e)}")
-    
-    # Add UUID debugging tool
-    st.subheader("Debug UUID Format")
-    debug_uuid = st.text_input(
-        "Enter UUID to debug",
-        value="917d257b-7be1-43ee-9ddb-1d9a6ce7746f"
-    )
-    
-    if st.button("Check UUID Format"):
-        formatted_uuid = debug_uuid_format(debug_uuid)
-        if formatted_uuid != debug_uuid:
-            st.info(f"UUID was reformatted from {debug_uuid} to {formatted_uuid}")
-    
-    # Add direct test for the problematic UUID
-    st.subheader("Fix Specific Document Issue")
-    problem_uuid = "917d257b-7be1-43ee-9ddb-1d9a6ce7746f"
-    
-    if st.button("Test Problematic UUID"):
-        st.write(f"Testing access to problematic UUID: {problem_uuid}")
-        
-        # Try different formats and access methods
-        test_formats = [
-            problem_uuid,  # Original
-            problem_uuid.lower(),  # All lowercase
-            problem_uuid.upper(),  # All uppercase
-            problem_uuid.replace('-', ''),  # No dashes
-            str(uuid.UUID(problem_uuid.replace('-', ''))),  # Standard format
-        ]
-        
-        # Test each format with both document and session endpoints
-        for i, test_format in enumerate(test_formats):
-            st.write(f"Format {i+1}: {test_format}")
-            
-            # Test document endpoint
-            try:
-                doc_url = join_api_url(API_BASE_URL, f"/documents/{test_format}")
-                doc_response = requests.get(doc_url, timeout=5)
-                if doc_response.status_code == 200:
-                    st.success(f"✅ Document endpoint works with this format! Status: {doc_response.status_code}")
-                    st.json(doc_response.json())
-                else:
-                    st.error(f"❌ Document endpoint failed: {doc_response.status_code}")
-            except Exception as e:
-                st.error(f"Document endpoint error: {str(e)}")
-            
-            # Test session endpoint
-            try:
-                session_url = join_api_url(API_BASE_URL, f"/chat/sessions/{test_format}")
-                session_response = requests.get(session_url, timeout=5)
-                st.write(f"Session endpoint status: {session_response.status_code}")
-            except Exception as e:
-                st.error(f"Session endpoint error: {str(e)}")
-    
-    # Check API endpoints (without nested expanders)
-    st.subheader("API Endpoint Status")
-    # List of key endpoints to check
-    endpoints = [
-        "/chat/sessions",
-        "/documents",
-        "/health",  # This is at base_url, not API_BASE_URL
-    ]
-    
-    # Test each endpoint directly
-    results = []
-    
-    # Special case for health endpoint
-    base_url = API_BASE_URL
-    if "/api" in base_url:
-        base_url = base_url.split("/api")[0]
-    
-    try:
-        health_url = f"{base_url}/health"
-        health_response = requests.get(health_url, timeout=3)
-        results.append({
-            "endpoint": "/health",
-            "url": health_url,
-            "status": health_response.status_code,
-            "working": health_response.status_code == 200,
-            "content": health_response.text[:200] + "..." if len(health_response.text) > 200 else health_response.text
-        })
-    except Exception as e:
-        results.append({
-            "endpoint": "/health",
-            "url": health_url,
-            "status": "Error",
-            "working": False,
-            "content": str(e)
-        })
-    
-    # Test API endpoints
-    for endpoint in endpoints:
-        if endpoint == "/health":
-            continue  # Already tested
-            
-        try:
-            url = join_api_url(API_BASE_URL, endpoint)
-            response = requests.get(url, timeout=3)
-            results.append({
-                "endpoint": endpoint,
-                "url": url,
-                "status": response.status_code,
-                "working": response.status_code == 200,
-                "content": response.text[:200] + "..." if len(response.text) > 200 else response.text
-            })
-        except Exception as e:
-            results.append({
-                "endpoint": endpoint,
-                "url": url,
-                "status": "Error",
-                "working": False,
-                "content": str(e)
-            })
-    
-    # Display results in a simple table format instead of expanders
-    endpoints_table = []
-    for result in results:
-        status_icon = "✅" if result["working"] else "❌"
-        endpoints_table.append({
-            "Endpoint": result["endpoint"],
-            "Status": f"{status_icon} {result['status']}",
-            "URL": result["url"]
-        })
-    
-    # Create a DataFrame for cleaner display
-    endpoints_df = pd.DataFrame(endpoints_table)
-    st.table(endpoints_df)
-    
-    # Add option to view response details
-    selected_endpoint = st.selectbox(
-        "Select endpoint to view response details:",
-        options=[r["endpoint"] for r in results],
-        key="endpoint_details"
-    )
-    
-    # Show content for selected endpoint
-    for result in results:
-        if result["endpoint"] == selected_endpoint:
-            st.write(f"Response from {result['url']}:")
-            st.code(result["content"])
-    
-    # Test chat session creation directly
-    st.subheader("Test Chat Session Creation")
-    if st.button("Create Test Session"):
-        try:
-            payload = {"name": "Diagnostic Test Chat"}
-            url = join_api_url(API_BASE_URL, "/chat/sessions")
-            st.write(f"Sending request to: {url}")
-            st.code(json.dumps(payload, indent=2))
-            
-            response = requests.post(url, json=payload, timeout=5)
-            st.write(f"Status: {response.status_code}")
-            st.code(response.text)
-            
-            if response.status_code in [200, 201]:
-                st.success("Test successful!")
-            else:
-                st.error("Test failed!")
-        except Exception as e:
-            st.error(f"Error: {str(e)}")
-
+            status_placeholder.error("Failed to create chat session. Please try again.")
 
 def chat_interface():
     """Streamlit interface for document chat - simplified approach."""
@@ -1138,7 +921,6 @@ def chat_interface():
     
     # Call the chat page renderer directly
     render_chat_page()
-
 
 def render_chat_page():
     """Render the chat interface page using a simplified approach similar to the example."""
@@ -1340,13 +1122,6 @@ def render_chat_page():
             if not document_ids and current_session.get('document_id'):
                 document_ids = [current_session['document_id']]
                 
-            # Add a status indicator for real-time connection
-            if settings.USE_WEBSOCKET_CHAT:
-                if "ws_connection" in st.session_state and st.session_state.ws_connection:
-                    st.success("⚡ Using real-time connection")
-                else:
-                    st.info("🔄 Using standard connection")
-            
             # Display session header with model info
             st.header(f"Chat: {session_name}")
             
@@ -1364,6 +1139,11 @@ def render_chat_page():
                     if "current_session_cache" in st.session_state:
                         del st.session_state.current_session_cache
             
+            # Only show connection status in special cases - removing DEBUG check
+            if settings.USE_WEBSOCKET_CHAT:
+                if "ws_connection" in st.session_state and st.session_state.ws_connection:
+                    st.success("⚡ Using real-time connection")
+                    
             # Display messages using the chat message container for a better look
             messages = current_session.get("messages", [])
             
@@ -1381,6 +1161,9 @@ def render_chat_page():
                 with st.chat_message("user"):
                     st.markdown(user_input)
                 
+                # Create a placeholder for any temporary messages
+                response_placeholder = st.empty()
+                
                 # Use a spinner while waiting for response
                 with st.spinner("AI is thinking..."):
                     # Send message with WebSocket or fallback to REST API
@@ -1391,10 +1174,17 @@ def render_chat_page():
                     )
                     
                     if response and response.get("success"):
+                        # Clear any temporary messages
+                        response_placeholder.empty()
+                        
                         # Display the AI response
                         with st.chat_message("assistant"):
                             ai_message = response.get("message", {})
-                            st.markdown(ai_message.get("text", ""))
+                            response_text = ai_message.get("text", "")
+                            if response_text:
+                                st.markdown(response_text)
+                            else:
+                                st.warning("Received empty response from AI. Please try again.")
                         
                         # Update session state
                         if "current_session_cache" in st.session_state:
@@ -1403,7 +1193,9 @@ def render_chat_page():
                             if current_session:
                                 st.session_state.current_session_cache = current_session
                     else:
-                        st.error("Failed to get a response. Please try again.")
+                        # Show a friendly error and suggest retry
+                        response_placeholder.error("I couldn't process your message at this time. The system may be experiencing temporary issues.")
+                        response_placeholder.info("You can try again or check back later.")
             
         elif st.session_state.current_session_id and not current_session:
             st.error("Error loading chat session. The session may have been deleted.")
@@ -1429,119 +1221,6 @@ def render_chat_page():
             # Add a quick direct creation form
             st.markdown("### Create New Chat Session")
             create_direct_chat_session(key_prefix="main")
-
-
-# WebSocket Helper Functions
-def get_ws_url(session_id):
-    """Get WebSocket URL for a chat session."""
-    # Derive WebSocket URL from API_BASE_URL (replacing http with ws)
-    base_url = API_BASE_URL.replace("http://", "ws://").replace("https://", "wss://")
-    return f"{base_url}/chat/ws/{session_id}"
-
-async def connect_websocket(session_id):
-    """Connect to WebSocket for a chat session."""
-    ws_url = get_ws_url(session_id)
-    try:
-        connection = await websockets.connect(ws_url)
-        # Store session data
-        if session_id not in st.session_state.ws_messages:
-            st.session_state.ws_messages[session_id] = []
-        return connection
-    except Exception as e:
-        print(f"Error connecting to WebSocket: {str(e)}")
-        st.error(f"Could not establish real-time connection. Falling back to REST API.")
-        return None
-
-async def send_message_ws(websocket, message, context_window=5):
-    """Send a message via WebSocket."""
-    if not websocket:
-        return None
-        
-    try:
-        # Prepare message data
-        data = {
-            "message": message,
-            "context_window": context_window
-        }
-        
-        # Send the message
-        await websocket.send(json.dumps(data))
-        
-        # Wait for and process responses
-        while True:
-            try:
-                response = await asyncio.wait_for(websocket.recv(), timeout=0.1)
-                data = json.loads(response)
-                
-                # Store the message in session state for display
-                if data.get("type") == "message" and data.get("status") == "complete":
-                    st.session_state.ws_messages[websocket.path.split("/")[-1]].append(data["message"])
-                    return data["message"]
-                    
-                # Update session data if provided
-                if data.get("type") == "session_data":
-                    st.session_state.current_session_cache = data["data"]
-                    
-                # Handle errors
-                if data.get("type") == "error":
-                    st.error(f"Error: {data.get('error')}")
-                    return None
-                    
-            except asyncio.TimeoutError:
-                # No message received, continue listening
-                await asyncio.sleep(0.1)
-                continue
-                
-    except Exception as e:
-        print(f"Error sending message via WebSocket: {str(e)}")
-        st.error(f"Communication error. Falling back to REST API.")
-        return None
-
-def ws_send_message(session_id, message, context_window=5):
-    """Send a message using WebSocket or fallback to REST API."""
-    # Check if we have websocket support enabled
-    if settings.USE_WEBSOCKET_CHAT:
-        # Try using WebSocket
-        try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            
-            # Connect if not connected
-            if "ws_connection" not in st.session_state or not st.session_state.ws_connection:
-                st.session_state.ws_connection = loop.run_until_complete(connect_websocket(session_id))
-            
-            # Send message if connected
-            if st.session_state.ws_connection:
-                result = loop.run_until_complete(send_message_ws(
-                    st.session_state.ws_connection, 
-                    message, 
-                    context_window
-                ))
-                
-                if result:
-                    return {"success": True, "message": result}
-            
-        except Exception as e:
-            print(f"WebSocket error: {str(e)}")
-            st.warning("Real-time connection failed. Using standard connection instead.")
-            # Close websocket if open
-            if "ws_connection" in st.session_state and st.session_state.ws_connection:
-                try:
-                    loop.run_until_complete(st.session_state.ws_connection.close())
-                except:
-                    pass
-                st.session_state.ws_connection = None
-    
-    # Fallback to REST API
-    response = send_message(session_id, message, context_window)
-    
-    if response:
-        # Get the assistant's response from updated messages
-        messages = response.get("messages", [])
-        if messages and messages[-1]["role"] == "assistant":
-            return {"success": True, "message": messages[-1]}
-    
-    return {"success": False, "error": "Failed to send message"}
 
 
 if __name__ == "__main__":

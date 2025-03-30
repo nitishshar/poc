@@ -67,7 +67,7 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")  # For Claude
     
     # Streamlit UI Performance Settings
-    USE_WEBSOCKET_CHAT: bool = os.getenv("USE_WEBSOCKET_CHAT", "False").lower() in ("true", "1", "t")  # Use WebSockets for real-time chat
+    USE_WEBSOCKET_CHAT: bool = os.getenv("USE_WEBSOCKET_CHAT", "True").lower() in ("true", "1", "t")  # Use WebSockets for real-time chat
     CACHE_DOCUMENT_LIST: bool = os.getenv("CACHE_DOCUMENT_LIST", "True").lower() in ("true", "1", "t")
     DOCUMENT_CACHE_TTL: int = int(os.getenv("DOCUMENT_CACHE_TTL", "30"))  # seconds
     
