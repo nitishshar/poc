@@ -178,62 +178,702 @@ st.sidebar.title("Document Processing Service")
 page = st.sidebar.radio("Navigation", ["Upload Document", "Document Status", "Search Embeddings", "Chat with Documents", "Document Manager"])
 
 if page == "Upload Document":
-    st.title("Upload Document for Processing")
+    st.title("Document Upload & Processing")
+
+    # Create tabs for two different upload experiences
+    upload_tabs = st.tabs(["Standard Upload", "Advanced Upload Options"])
     
-    with st.form("upload_form"):
-        uploaded_file = st.file_uploader("Select Document", 
-                                         type=["pdf", "docx", "doc", "txt", "csv", "xlsx", "xls"],
-                                         help="Select a document to upload and process")
-        
-        process_immediately = st.checkbox("Process immediately after upload", value=True,
-                                         help="If checked, document processing will start immediately after upload")
-        
-        submit_button = st.form_submit_button("Upload Document")
-        
-        if submit_button and uploaded_file is not None:
-            with st.spinner("Uploading document..."):
-                files = {"file": (uploaded_file.name, uploaded_file.getvalue())}
-                response = requests.post(
-                    urljoin(API_BASE_URL, "/documents/upload"),
-                    params={"process_immediately": str(process_immediately).lower()},
-                    files=files
-                )
-                
-                if response.status_code == 200:
-                    result = response.json()
-                    st.success(f"Document uploaded successfully. Document ID: {result['document_id']}")
-                    
-                    # Store document ID in session state
-                    if "document_ids" not in st.session_state:
-                        st.session_state.document_ids = []
-                    
-                    st.session_state.document_ids.append(result["document_id"])
-                    
-                    # Set current document
-                    st.session_state.current_document_id = result["document_id"]
-                    
-                    # Redirect to status page
-                    st.experimental_rerun()
-                else:
-                    st.error(f"Error uploading document: {response.text}")
-    
-    # Display recent documents if available
-    if "document_ids" in st.session_state and st.session_state.document_ids:
-        st.subheader("Recent Documents")
-        
-        for doc_id in reversed(st.session_state.document_ids[-5:]):  # Show last 5 documents
-            doc_status = get_document_status(doc_id)
+    with upload_tabs[0]:
+        # Simplified unified upload form
+        with st.form("unified_upload_form"):
+            st.subheader("Upload Documents")
+            st.write("Choose one of the following upload methods:")
+
+            # Upload method selection
+            upload_method = st.radio(
+                "Upload Method",
+                ["Upload File(s)", "From Server Path", "From URL"],
+                horizontal=True
+            )
             
-            if doc_status:
-                col1, col2, col3 = st.columns([3, 1, 1])
-                with col1:
-                    st.write(f"**{doc_status['original_filename']}**")
-                with col2:
-                    st.write(f"Status: {doc_status['status']}")
-                with col3:
-                    if st.button("View Status", key=f"view_{doc_id}"):
-                        st.session_state.current_document_id = doc_id
-                        st.experimental_rerun()
+            # Container for the selected method
+            if upload_method == "Upload File(s)":
+                uploaded_files = st.file_uploader(
+                    "Select Document(s)", 
+                    type=["pdf", "docx", "doc", "txt", "csv", "xlsx", "xls"],
+                    help="Select one or more documents to upload and process",
+                    accept_multiple_files=True
+                )
+            
+            elif upload_method == "From Server Path":
+                file_path = st.text_input(
+                    "Enter file path on server", 
+                    help="Enter the full path to a file on the server (e.g., C:/documents/example.pdf)"
+                )
+                st.caption("💡 Use forward slashes (/) instead of backslashes (\\) for Windows paths")
+            
+            else:  # From URL
+                file_url = st.text_input(
+                    "Enter document URL", 
+                    help="Enter the URL of a document to download and process (e.g., https://example.com/document.pdf)"
+                )
+            
+            process_immediately = st.checkbox(
+                "Process immediately after upload", 
+                value=True,
+                help="If checked, document processing will start immediately after upload"
+            )
+            
+            submit_button = st.form_submit_button("Upload & Process")
+            
+            if submit_button:
+                if upload_method == "Upload File(s)" and uploaded_files:
+                    with st.spinner("Uploading document(s)..."):
+                        if len(uploaded_files) == 1:
+                            # Single file upload
+                            files = {"file": (uploaded_files[0].name, uploaded_files[0].getvalue())}
+                            response = requests.post(
+                                urljoin(API_BASE_URL, "/documents/upload"),
+                                params={"process_immediately": str(process_immediately).lower()},
+                                files=files
+                            )
+                            
+                            if response.status_code == 200:
+                                result = response.json()
+                                st.success(f"Document uploaded successfully. Document ID: {result['document_id']}")
+                                
+                                # Store document ID in session state
+                                if "document_ids" not in st.session_state:
+                                    st.session_state.document_ids = []
+                                
+                                st.session_state.document_ids.append(result["document_id"])
+                                
+                                # Set current document
+                                st.session_state.current_document_id = result["document_id"]
+                                
+                                # Store a flag to redirect to status page after form submission
+                                st.session_state.redirect_to_status = True
+                            else:
+                                st.error(f"Error uploading document: {response.text}")
+                        else:
+                            # Multiple files upload
+                            # Create files list in the format expected by FastAPI
+                            files = []
+                            for file in uploaded_files:
+                                files.append(("files", (file.name, file.getvalue(), 'application/octet-stream')))
+                                
+                            response = requests.post(
+                                urljoin(API_BASE_URL, "/documents/upload-multiple"),
+                                params={"process_immediately": str(process_immediately).lower()},
+                                files=files
+                            )
+                            
+                            if response.status_code == 200:
+                                results = response.json()
+                                
+                                # Display summary
+                                st.success(f"Successfully uploaded {len([r for r in results if r.get('document_id')])} of {len(uploaded_files)} documents")
+                                
+                                # Display details in an expander
+                                with st.expander("Upload Details"):
+                                    for i, result in enumerate(results):
+                                        if result.get("document_id"):
+                                            st.success(f"{uploaded_files[i].name}: {result['message']}")
+                                            
+                                            # Store document ID in session state
+                                            if "document_ids" not in st.session_state:
+                                                st.session_state.document_ids = []
+                                            
+                                            st.session_state.document_ids.append(result["document_id"])
+                                            
+                                            # Set the last successfully uploaded document as current
+                                            st.session_state.current_document_id = result["document_id"]
+                                        else:
+                                            st.error(f"{uploaded_files[i].name}: {result['message']}")
+                                
+                                # Redirect to status page if at least one file was uploaded successfully
+                                if any(r.get("document_id") for r in results):
+                                    # Store a flag to redirect to status page after form submission
+                                    st.session_state.redirect_to_status = True
+                            else:
+                                st.error(f"Error uploading documents: {response.text}")
+                    
+                elif upload_method == "From Server Path" and file_path:
+                    with st.spinner("Processing document..."):
+                        # Normalize file path (replace backslashes with forward slashes)
+                        normalized_path = file_path.replace('\\', '/')
+                        
+                        data = {
+                            "file_path": normalized_path,
+                            "file_url": None,
+                            "process_immediately": process_immediately
+                        }
+                        
+                        try:
+                            response = requests.post(
+                                urljoin(API_BASE_URL, "/documents/upload-by-path"),
+                                json=data
+                            )
+                            
+                            # Debug information
+                            with st.expander("Request Details (for troubleshooting)"):
+                                st.write(f"**Request URL:** {urljoin(API_BASE_URL, '/documents/upload-by-path')}")
+                                st.write(f"**Request Body:** {data}")
+                                st.write(f"**Response Status:** {response.status_code}")
+                                st.write(f"**Response Content:** {response.text}")
+                            
+                            if response.status_code in [200, 201, 202]:
+                                result = response.json()
+                                st.success(f"Document processed successfully. Document ID: {result['document_id']}")
+                                
+                                # Store document ID in session state
+                                if "document_ids" not in st.session_state:
+                                    st.session_state.document_ids = []
+                                
+                                st.session_state.document_ids.append(result["document_id"])
+                                
+                                # Set current document
+                                st.session_state.current_document_id = result["document_id"]
+                                
+                                # Store a flag to redirect to status page after form submission
+                                st.session_state.redirect_to_status = True
+                            else:
+                                st.error(f"Error processing document: {response.text}")
+                                
+                                # Help suggestions
+                                if response.status_code == 404:
+                                    st.warning("The API endpoint was not found. Please check that the backend server is running and accessible.")
+                                    st.info("Try these troubleshooting steps:")
+                                    st.markdown("1. Make sure the FastAPI backend is running (check terminal)")
+                                    st.markdown("2. Verify the API Base URL is correct")
+                                    st.markdown("3. Check if there are any firewall or network issues")
+                                elif "File not found" in response.text:
+                                    st.warning("The file path could not be found on the server.")
+                                    st.info("Try these troubleshooting steps:")
+                                    st.markdown("1. Make sure the file exists at the exact path specified")
+                                    st.markdown("2. Remember that the path must be accessible to the server, not your local machine")
+                                    st.markdown("3. Try using an absolute path instead of a relative path")
+                                    st.markdown("4. Check file permissions (the server must have read access)")
+                        except Exception as e:
+                            st.error(f"Error connecting to API: {str(e)}")
+                            st.info("Check that the backend server is running and accessible.")
+                
+                elif upload_method == "From URL" and file_url:
+                    with st.spinner("Downloading and processing document..."):
+                        data = {
+                            "file_path": None,
+                            "file_url": file_url,
+                            "process_immediately": process_immediately
+                        }
+                        
+                        try:
+                            response = requests.post(
+                                urljoin(API_BASE_URL, "/documents/upload-by-path"),
+                                json=data
+                            )
+                            
+                            if response.status_code in [200, 201, 202]:
+                                result = response.json()
+                                st.success(f"Document downloaded and processed successfully. Document ID: {result['document_id']}")
+                                
+                                # Store document ID in session state
+                                if "document_ids" not in st.session_state:
+                                    st.session_state.document_ids = []
+                                
+                                st.session_state.document_ids.append(result["document_id"])
+                                
+                                # Set current document
+                                st.session_state.current_document_id = result["document_id"]
+                                
+                                # Store a flag to redirect to status page after form submission
+                                st.session_state.redirect_to_status = True
+                            else:
+                                st.error(f"Error downloading and processing document: {response.text}")
+                                if response.status_code == 404:
+                                    st.warning("The API endpoint was not found. Please check that the backend server is running and accessible.")
+                        except Exception as e:
+                            st.error(f"Error connecting to API: {str(e)}")
+                            st.info("Check that the backend server is running and accessible.")
+                else:
+                    if upload_method == "Upload File(s)":
+                        st.warning("Please select at least one file to upload.")
+                    elif upload_method == "From Server Path":
+                        st.warning("Please enter a file path on the server.")
+                    else:
+                        st.warning("Please enter a URL for the document.")
+        
+        # Check if we need to redirect to the status page after form submission
+        if st.session_state.get("redirect_to_status"):
+            st.session_state.redirect_to_status = False
+            st.button("View Document Status", on_click=lambda: st.experimental_rerun())
+        
+        # API connection status
+        with st.expander("API Connection Settings"):
+            current_api_url = st.text_input("API Base URL", value=API_BASE_URL, key="api_base_url_unified")
+            if current_api_url != API_BASE_URL:
+                API_BASE_URL = current_api_url
+            
+            if st.button("Test API Connection", key="test_api_unified"):
+                try:
+                    response = requests.get(urljoin(API_BASE_URL, "/documents"))
+                    if response.status_code == 200:
+                        st.success(f"✅ Successfully connected to API at {API_BASE_URL}")
+                    else:
+                        st.error(f"❌ API returned status code: {response.status_code}")
+                except Exception as e:
+                    st.error(f"❌ Failed to connect to API: {str(e)}")
+    
+    with upload_tabs[1]:
+        # Keep the existing tabbed interface for advanced users
+        advanced_tabs = st.tabs(["Upload File", "Local Path", "URL"])
+        
+        with advanced_tabs[0]:
+            # File upload form
+            with st.form("upload_form"):
+                uploaded_files = st.file_uploader("Select Document(s)", 
+                    type=["pdf", "docx", "doc", "txt", "csv", "xlsx", "xls"],
+                    help="Select one or more documents to upload and process",
+                    accept_multiple_files=True)
+                
+                process_immediately = st.checkbox("Process immediately after upload", value=True,
+                                                help="If checked, document processing will start immediately after upload")
+                
+                submit_button = st.form_submit_button("Upload Document(s)")
+                
+                if submit_button and uploaded_files:
+                    with st.spinner("Uploading document(s)..."):
+                        if len(uploaded_files) == 1:
+                            # Single file upload
+                            files = {"file": (uploaded_files[0].name, uploaded_files[0].getvalue())}
+                            response = requests.post(
+                                urljoin(API_BASE_URL, "/documents/upload"),
+                                params={"process_immediately": str(process_immediately).lower()},
+                                files=files
+                            )
+                            
+                            if response.status_code == 200:
+                                result = response.json()
+                                st.success(f"Document uploaded successfully. Document ID: {result['document_id']}")
+                                
+                                # Store document ID in session state
+                                if "document_ids" not in st.session_state:
+                                    st.session_state.document_ids = []
+                                
+                                st.session_state.document_ids.append(result["document_id"])
+                                
+                                # Set current document
+                                st.session_state.current_document_id = result["document_id"]
+                                
+                                # Store a flag to redirect to status page after form submission
+                                st.session_state.redirect_to_status = True
+                            else:
+                                st.error(f"Error uploading document: {response.text}")
+                        else:
+                            # Multiple files upload
+                            # Create files list in the format expected by FastAPI
+                            files = []
+                            for file in uploaded_files:
+                                files.append(("files", (file.name, file.getvalue(), 'application/octet-stream')))
+                                
+                            response = requests.post(
+                                urljoin(API_BASE_URL, "/documents/upload-multiple"),
+                                params={"process_immediately": str(process_immediately).lower()},
+                                files=files
+                            )
+                            
+                            if response.status_code == 200:
+                                results = response.json()
+                                
+                                # Display summary
+                                st.success(f"Successfully uploaded {len([r for r in results if r.get('document_id')])} of {len(uploaded_files)} documents")
+                                
+                                # Display details in an expander
+                                with st.expander("Upload Details"):
+                                    for i, result in enumerate(results):
+                                        if result.get("document_id"):
+                                            st.success(f"{uploaded_files[i].name}: {result['message']}")
+                                            
+                                            # Store document ID in session state
+                                            if "document_ids" not in st.session_state:
+                                                st.session_state.document_ids = []
+                                            
+                                            st.session_state.document_ids.append(result["document_id"])
+                                            
+                                            # Set the last successfully uploaded document as current
+                                            st.session_state.current_document_id = result["document_id"]
+                                        else:
+                                            st.error(f"{uploaded_files[i].name}: {result['message']}")
+                            
+                                # Redirect to status page if at least one file was uploaded successfully
+                                if any(r.get("document_id") for r in results):
+                                    # Store a flag to redirect to status page after form submission
+                                    st.session_state.redirect_to_status = True
+                            else:
+                                st.error(f"Error uploading documents: {response.text}")
+            
+            # Check if we need to redirect to the status page after form submission
+            if st.session_state.get("redirect_to_status"):
+                st.session_state.redirect_to_status = False
+                st.button("View Document Status", on_click=lambda: st.experimental_rerun())
+        
+        with advanced_tabs[1]:
+            # Local file path form
+            with st.form("local_path_form"):
+                st.write("Enter local file path(s) on the server")
+                
+                # Option for single file or multiple files
+                upload_type = st.radio("Upload type", ["Single File", "Multiple Files"], key="path_upload_type")
+                
+                if upload_type == "Single File":
+                    # Single file input
+                    file_path = st.text_input(
+                        "Enter file path", 
+                        help="Enter the full path to a file on the server (e.g., C:/documents/example.pdf)"
+                    )
+                    # Display path format guidance
+                    st.caption("💡 Use forward slashes (/) instead of backslashes (\\) for Windows paths")
+                    file_paths = [file_path] if file_path else []
+                else:
+                    # Multiple files input with textarea
+                    file_paths_text = st.text_area(
+                        "Enter file paths (one per line)", 
+                        help="Enter full paths to files on the server, one path per line"
+                    )
+                    # Display path format guidance
+                    st.caption("💡 Use forward slashes (/) instead of backslashes (\\) for Windows paths")
+                    # Split by newline and filter out empty lines
+                    file_paths = [path.strip() for path in file_paths_text.split('\n') if path.strip()]
+                    
+                    # Option to upload a directory
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        directory_path = st.text_input(
+                            "Or enter a directory path",
+                            help="Enter a directory path to process all supported files in that directory"
+                        )
+                    
+                    with col2:
+                        if directory_path:
+                            include_subdirs = st.checkbox(
+                                "Include subdirectories",
+                                help="If checked, files in subdirectories will also be processed"
+                            )
+                
+                # Move the API settings expander outside the form to fix the button issue
+                
+                process_immediately = st.checkbox("Process immediately after upload", value=True,
+                                                help="If checked, document processing will start immediately after upload",
+                                                key="path_process")
+                
+                submit_button = st.form_submit_button("Process Document(s)")
+                
+                if submit_button:
+                    # Process directory if specified
+                    if upload_type == "Multiple Files" and directory_path:
+                        with st.spinner(f"Scanning directory {directory_path}..."):
+                            st.info(f"Scanning {'recursively' if include_subdirs else 'directory'} - this might take a moment for large directories")
+                            
+                            # Fall back to JSON endpoint for directory scanning
+                            data = {
+                                "directory_path": directory_path,
+                                "include_subdirectories": include_subdirs,
+                                "process_immediately": process_immediately
+                            }
+                            
+                            # Call a custom request handler for this
+                            st.info("Directory scanning support requires the API to be running. Please ensure the backend is running.")
+                            st.warning("Directory scanning is not fully implemented in this demo.")
+                    
+                    # Process specific files if listed
+                    if file_paths:
+                        with st.spinner(f"Processing {len(file_paths)} document(s)..."):
+                            # Normalize file paths (replace backslashes with forward slashes)
+                            normalized_paths = [path.replace('\\', '/') for path in file_paths]
+                            
+                            if len(normalized_paths) == 1:
+                                # Single file processing
+                                data = {
+                                    "file_path": normalized_paths[0],
+                                    "file_url": None,
+                                    "process_immediately": process_immediately
+                                }
+                                
+                                # Call the API
+                                try:
+                                    response = requests.post(
+                                        urljoin(API_BASE_URL, "/documents/upload-by-path"),
+                                        json=data
+                                    )
+                                    
+                                    # Debug information
+                                    with st.expander("Request Details (for troubleshooting)"):
+                                        st.write(f"**Request URL:** {urljoin(API_BASE_URL, '/documents/upload-by-path')}")
+                                        st.write(f"**Request Body:** {data}")
+                                        st.write(f"**Response Status:** {response.status_code}")
+                                        st.write(f"**Response Content:** {response.text}")
+                                    
+                                    if response.status_code in [200, 201, 202]:
+                                        result = response.json()
+                                        st.success(f"Document processed successfully. Document ID: {result['document_id']}")
+                                        
+                                        # Store document ID in session state
+                                        if "document_ids" not in st.session_state:
+                                            st.session_state.document_ids = []
+                                        
+                                        st.session_state.document_ids.append(result["document_id"])
+                                        
+                                        # Set current document
+                                        st.session_state.current_document_id = result["document_id"]
+                                        
+                                        # Store a flag to redirect to status page after form submission
+                                        st.session_state.redirect_to_status = True
+                                    else:
+                                        st.error(f"Error processing document: {response.text}")
+                                        
+                                        # Help suggestions
+                                        if response.status_code == 404:
+                                            st.warning("The API endpoint was not found. Please check that the backend server is running and accessible.")
+                                            st.info("Try these troubleshooting steps:")
+                                            st.markdown("1. Make sure the FastAPI backend is running (check terminal)")
+                                            st.markdown("2. Verify the API Base URL in the settings above")
+                                            st.markdown("3. Check if there are any firewall or network issues")
+                                        elif "File not found" in response.text:
+                                            st.warning("The file path could not be found on the server.")
+                                            st.info("Try these troubleshooting steps:")
+                                            st.markdown("1. Make sure the file exists at the exact path specified")
+                                            st.markdown("2. Remember that the path must be accessible to the server, not your local machine")
+                                            st.markdown("3. Try using an absolute path instead of a relative path")
+                                            st.markdown("4. Check file permissions (the server must have read access)")
+                                except Exception as e:
+                                    st.error(f"Error connecting to API: {str(e)}")
+                                    st.info("Check that the backend server is running and accessible.")
+                            else:
+                                # Multiple files processing
+                                batch_data = []
+                                for path in normalized_paths:
+                                    batch_data.append({
+                                        "file_path": path,
+                                        "file_url": None,
+                                        "process_immediately": process_immediately
+                                    })
+                                
+                                # Call the batch API
+                                try:
+                                    response = requests.post(
+                                        urljoin(API_BASE_URL, "/documents/batch-upload"),
+                                        json=batch_data
+                                    )
+                                    
+                                    # Debug information
+                                    with st.expander("Request Details (for troubleshooting)"):
+                                        st.write(f"**Request URL:** {urljoin(API_BASE_URL, '/documents/batch-upload')}")
+                                        st.write(f"**Request Body (first item):** {batch_data[0] if batch_data else 'Empty'}")
+                                        st.write(f"**Response Status:** {response.status_code}")
+                                        st.write("**Response Content (truncated):**")
+                                        st.write(response.text[:500] + "..." if len(response.text) > 500 else response.text)
+                                    
+                                    if response.status_code == 200:
+                                        results = response.json()
+                                        
+                                        # Count successful uploads
+                                        success_count = len([r for r in results if r.get("document_id")])
+                                        
+                                        # Display summary
+                                        st.success(f"Successfully processed {success_count} of {len(file_paths)} documents")
+                                        
+                                        # Display details in an expander
+                                        with st.expander("Processing Details"):
+                                            for i, result in enumerate(results):
+                                                if result.get("document_id"):
+                                                    st.success(f"{file_paths[i]}: {result['message']}")
+                                                    
+                                                    # Store document ID in session state
+                                                    if "document_ids" not in st.session_state:
+                                                        st.session_state.document_ids = []
+                                                    
+                                                    st.session_state.document_ids.append(result["document_id"])
+                                                    
+                                                    # Set the last successfully uploaded document as current
+                                                    st.session_state.current_document_id = result["document_id"]
+                                                else:
+                                                    st.error(f"{file_paths[i]}: {result['message']}")
+                                        
+                                        # Redirect to status page if at least one file was processed successfully
+                                        if success_count > 0:
+                                            # Store a flag to redirect to status page after form submission
+                                            st.session_state.redirect_to_status = True
+                                    else:
+                                        st.error(f"Error processing documents: {response.text}")
+                                        
+                                        # Help suggestions
+                                        if response.status_code == 404:
+                                            st.warning("The API endpoint was not found. Please check that the backend server is running and accessible.")
+                                except Exception as e:
+                                    st.error(f"Error connecting to API: {str(e)}")
+                                    st.info("Check that the backend server is running and accessible.")
+                    else:
+                        st.warning("Please enter at least one file path to process.")
+            
+            # Check if we need to redirect to the status page after form submission
+            if st.session_state.get("redirect_to_status"):
+                st.session_state.redirect_to_status = False
+                st.button("View Document Status", on_click=lambda: st.experimental_rerun())
+            
+            # Add API status check - moved outside the form
+            with st.expander("API Connection Settings"):
+                current_api_url = st.text_input("API Base URL", value=API_BASE_URL, key="api_base_url")
+                if current_api_url != API_BASE_URL:
+                    API_BASE_URL = current_api_url
+                
+                if st.button("Test API Connection"):
+                    try:
+                        response = requests.get(urljoin(API_BASE_URL, "/documents"))
+                        if response.status_code == 200:
+                            st.success(f"✅ Successfully connected to API at {API_BASE_URL}")
+                        else:
+                            st.error(f"❌ API returned status code: {response.status_code}")
+                    except Exception as e:
+                        st.error(f"❌ Failed to connect to API: {str(e)}")
+        
+        with advanced_tabs[2]:
+            # URL form
+            with st.form("url_form"):
+                # Option for single URL or multiple URLs
+                url_upload_type = st.radio("Upload type", ["Single URL", "Multiple URLs"], key="url_upload_type")
+                
+                if url_upload_type == "Single URL":
+                    # Single URL input
+                    file_url = st.text_input("Enter document URL", 
+                                            help="Enter the URL of a document to download and process (e.g., https://example.com/document.pdf)")
+                    file_urls = [file_url] if file_url else []
+                else:
+                    # Multiple URLs input with textarea
+                    file_urls_text = st.text_area(
+                        "Enter document URLs (one per line)", 
+                        help="Enter URLs of documents to download and process, one URL per line"
+                    )
+                    # Split by newline and filter out empty lines
+                    file_urls = [url.strip() for url in file_urls_text.split('\n') if url.strip()]
+                
+                process_immediately = st.checkbox("Process immediately after upload", value=True,
+                                                help="If checked, document processing will start immediately after upload",
+                                                key="url_process")
+                
+                submit_button = st.form_submit_button("Download & Process")
+                
+                if submit_button and file_urls:
+                    with st.spinner(f"Downloading and processing {len(file_urls)} document(s)..."):
+                        if len(file_urls) == 1:
+                            # Single URL processing
+                            data = {
+                                "file_path": None,
+                                "file_url": file_urls[0],
+                                "process_immediately": process_immediately
+                            }
+                            
+                            # Call the API
+                            try:
+                                response = requests.post(
+                                    urljoin(API_BASE_URL, "/documents/upload"),
+                                    data={"file_url": file_urls[0], "process_immediately": str(process_immediately).lower()}
+                                )
+                            except Exception:
+                                # Fall back to JSON endpoint
+                                response = requests.post(
+                                    urljoin(API_BASE_URL, "/documents/upload-by-path"),
+                                    json=data
+                                )
+                            
+                            if response.status_code in [200, 201, 202]:
+                                result = response.json()
+                                st.success(f"Document downloaded and processed successfully. Document ID: {result['document_id']}")
+                                
+                                # Store document ID in session state
+                                if "document_ids" not in st.session_state:
+                                    st.session_state.document_ids = []
+                                
+                                st.session_state.document_ids.append(result["document_id"])
+                                
+                                # Set current document
+                                st.session_state.current_document_id = result["document_id"]
+                                
+                                # Store a flag to redirect to status page after form submission
+                                st.session_state.redirect_to_status = True
+                            else:
+                                st.error(f"Error downloading and processing document: {response.text}")
+                        else:
+                            # Multiple URLs processing
+                            batch_data = []
+                            for url in file_urls:
+                                batch_data.append({
+                                    "file_path": None,
+                                    "file_url": url,
+                                    "process_immediately": process_immediately
+                                })
+                            
+                            # Call the batch API
+                            response = requests.post(
+                                urljoin(API_BASE_URL, "/documents/batch-upload"),
+                                json=batch_data
+                            )
+                            
+                            if response.status_code == 200:
+                                results = response.json()
+                                
+                                # Count successful downloads
+                                success_count = len([r for r in results if r.get("document_id")])
+                                
+                                # Display summary
+                                st.success(f"Successfully downloaded and processed {success_count} of {len(file_urls)} documents")
+                                
+                                # Display details in an expander
+                                with st.expander("Processing Details"):
+                                    for i, result in enumerate(results):
+                                        if result.get("document_id"):
+                                            st.success(f"{file_urls[i]}: {result['message']}")
+                                            
+                                            # Store document ID in session state
+                                            if "document_ids" not in st.session_state:
+                                                st.session_state.document_ids = []
+                                            
+                                            st.session_state.document_ids.append(result["document_id"])
+                                            
+                                            # Set the last successfully downloaded document as current
+                                            st.session_state.current_document_id = result["document_id"]
+                                        else:
+                                            st.error(f"{file_urls[i]}: {result['message']}")
+                                
+                                # Redirect to status page if at least one URL was processed successfully
+                                if success_count > 0:
+                                    # Store a flag to redirect to status page after form submission
+                                    st.session_state.redirect_to_status = True
+                            else:
+                                st.error(f"Error downloading and processing documents: {response.text}")
+                elif submit_button:
+                    st.warning("Please enter at least one URL to process.")
+            
+            # Check if we need to redirect to the status page after form submission
+            if st.session_state.get("redirect_to_status"):
+                st.session_state.redirect_to_status = False
+                st.button("View Document Status", on_click=lambda: st.experimental_rerun())
+
+# Display recent documents if available
+if page == "Upload Document" and "document_ids" in st.session_state and st.session_state.document_ids:
+    st.subheader("Recent Documents")
+    
+    for doc_id in reversed(st.session_state.document_ids[-5:]):  # Show last 5 documents
+        doc_status = get_document_status(doc_id)
+        
+        if doc_status:
+            col1, col2, col3 = st.columns([3, 1, 1])
+            with col1:
+                st.write(f"**{doc_status['original_filename']}**")
+            with col2:
+                st.write(f"Status: {doc_status['status']}")
+            with col3:
+                if st.button("View Status", key=f"view_{doc_id}"):
+                    st.session_state.current_document_id = doc_id
+                    st.experimental_rerun()
 
 elif page == "Document Status":
     st.title("Document Processing Status")

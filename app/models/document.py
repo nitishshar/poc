@@ -94,8 +94,9 @@ class DocumentModel(BaseModel):
     embedding_collection_name: Optional[str] = None
     error_message: Optional[str] = None
     
-    class Config:
-        orm_mode = True
+    model_config = {
+        "from_attributes": True
+    }
 
 
 class DocumentResponse(BaseModel):
@@ -117,4 +118,26 @@ class DocumentUploadResponse(BaseModel):
     """Response after document upload."""
     document_id: UUID
     message: str
-    status: DocumentStatus 
+    status: DocumentStatus
+
+
+class DocumentUploadRequest(BaseModel):
+    """Request for document upload by path or URL."""
+    file_path: Optional[str] = None
+    file_url: Optional[str] = None
+    process_immediately: bool = True
+    
+    model_config = {
+        "json_schema_extra": {
+            "examples": [
+                {
+                    "file_path": "C:/path/to/document.pdf",
+                    "process_immediately": True
+                },
+                {
+                    "file_url": "https://example.com/document.pdf",
+                    "process_immediately": True
+                }
+            ]
+        }
+    } 

@@ -1,0 +1,50 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Start Streamlit",
+            "type": "process",
+            "command": "python",
+            "args": [
+                "-m",
+                "streamlit",
+                "run",
+                "app/frontend/main.py",
+                "--server.port",
+                "8501",
+                "--server.address",
+                "localhost"
+            ],
+            "isBackground": true,
+            "problemMatcher": {
+                "pattern": {
+                    "regexp": "^.*$"
+                },
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": "^.*Streamlit.*$",
+                    "endsPattern": "^.*You can now view your Streamlit app.*$"
+                }
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            }
+        },
+        {
+            "label": "Kill All Python",
+            "type": "shell",
+            "command": "taskkill /F /IM python.exe",
+            "windows": {
+                "command": "taskkill /F /IM python.exe"
+            },
+            "linux": {
+                "command": "pkill -f python"
+            },
+            "osx": {
+                "command": "pkill -f python"
+            },
+            "problemMatcher": []
+        }
+    ]
+} 

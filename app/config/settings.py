@@ -1,5 +1,5 @@
 import os
-from pydantic import BaseSettings
+from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -48,8 +48,10 @@ class Settings(BaseSettings):
     STREAMLIT_HOST: str = os.getenv("STREAMLIT_HOST", "localhost")
     STREAMLIT_PORT: int = int(os.getenv("STREAMLIT_PORT", "8501"))
     
-    class Config:
-        case_sensitive = True
+    model_config = {
+        "case_sensitive": True,
+        "extra": "ignore"
+    }
 
 settings = Settings()
 
