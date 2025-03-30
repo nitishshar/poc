@@ -14,7 +14,7 @@ from app.models.document import (
 )
 from app.services.document_processor import (
     process_document, get_document, save_document, calculate_processing_progress,
-    list_documents
+    list_documents, delete_document as delete_doc_from_store
 )
 from app.services.embedding import query_embeddings, get_collection_info
 
@@ -363,4 +363,36 @@ async def get_all_documents():
             error_message=document.error_message
         ))
     
-    return response 
+    return response
+
+
+@router.delete("/documents/{document_id}")
+async def delete_document(document_id: UUID = Path(..., description="The ID of the document")):
+    """
+    Delete a document.
+    
+    Args:
+        document_id: The ID of the document to delete
+        
+    Returns:
+        JSON response with status
+    """
+    document = get_document(document_id)
+    
+    if not document:
+        raise HTTPException(status_code=404, detail=f"Document with ID {document_id} not found")
+        
+    try:
+        # Remove physical file if it exists
+        if os.path.exists(document.filename):
+            os.remove(document.filename)
+            
+        # Remove document from store
+        delete_doc_from_store(document_id)
+        
+        return JSONResponse(
+            status_code=200,
+            content={"message": f"Document {document_id} deleted successfully"}
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error deleting document: {str(e)}") 

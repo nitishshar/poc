@@ -202,38 +202,43 @@ async def query_embeddings(
 
 
 async def delete_collection(collection_name: str) -> bool:
-    """Delete a collection of embeddings."""
-    def _delete():
-        try:
-            chroma_client.delete_collection(name=collection_name)
-            return True
-        except Exception as e:
-            print(f"Error deleting collection: {str(e)}")
-            return False
+    """Delete a collection from ChromaDB.
     
-    return await asyncio.get_event_loop().run_in_executor(executor, _delete)
+    Args:
+        collection_name: The name of the collection to delete
+        
+    Returns:
+        True if the collection was deleted, False otherwise
+    """
+    if not collection_name:
+        return False
+        
+    try:
+        # Check if collection exists
+        try:
+            chroma_client.get_collection(name=collection_name)
+        except Exception:
+            # Collection doesn't exist, nothing to delete
+            return True
+            
+        # Delete the collection
+        chroma_client.delete_collection(name=collection_name)
+        print(f"Deleted collection: {collection_name}")
+        return True
+    except Exception as e:
+        print(f"Error deleting collection: {str(e)}")
+        return False
 
 
 async def get_collection_info(collection_name: str) -> Dict[str, Any]:
     """Get information about a collection."""
-    def _get_info():
-        try:
-            collection = chroma_client.get_collection(
-                name=collection_name,
-                embedding_function=sentence_transformer_ef
-            )
-            
-            count = collection.count()
-            return {
-                "name": collection_name,
-                "count": count
-            }
-        except Exception as e:
-            print(f"Error getting collection info: {str(e)}")
-            return {
-                "name": collection_name,
-                "count": 0,
-                "error": str(e)
-            }
-    
-    return await asyncio.get_event_loop().run_in_executor(executor, _get_info) 
+    try:
+        collection = chroma_client.get_collection(name=collection_name)
+        count = collection.count()
+        return {
+            "name": collection_name,
+            "count": count
+        }
+    except Exception as e:
+        print(f"Error getting collection info: {str(e)}")
+        return {"name": collection_name, "count": 0, "error": str(e)} 

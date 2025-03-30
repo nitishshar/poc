@@ -20,7 +20,7 @@ from app.services.extractors import (
 )
 from app.services.metadata import extract_metadata
 from app.services.chunking import chunk_text
-from app.services.embedding import generate_embeddings
+from app.services.embedding import generate_embeddings, delete_collection
 
 logger = logging.getLogger(__name__)
 
@@ -231,6 +231,32 @@ def list_documents() -> List[DocumentModel]:
         List of all document models
     """
     return list(document_store.values())
+
+
+def delete_document(document_id: UUID) -> bool:
+    """Delete a document from the document store.
+    
+    Args:
+        document_id: The ID of the document to delete
+        
+    Returns:
+        True if the document was deleted, False otherwise
+    """
+    document = document_store.get(document_id)
+    if not document:
+        return False
+    
+    try:
+        # Delete the document's Chroma DB collection if it exists
+        if document.embedding_collection_name:
+            asyncio.run(delete_collection(document.embedding_collection_name))
+        
+        # Delete the document from the store
+        del document_store[document_id]
+        return True
+    except Exception as e:
+        logger.exception(f"Error deleting document: {str(e)}")
+        return False
 
 
 def save_document(document: DocumentModel) -> DocumentModel:

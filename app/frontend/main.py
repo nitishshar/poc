@@ -14,6 +14,8 @@ import fitz  # PyMuPDF for PDF manipulation
 
 # Import the chat interface
 from chat import chat_interface
+# Import the document manager
+from document_manager import document_manager_ui
 
 # Set page configuration
 st.set_page_config(
@@ -173,7 +175,7 @@ def highlight_pdf_sections(pdf_content, text_chunks):
 
 # Sidebar navigation
 st.sidebar.title("Document Processing Service")
-page = st.sidebar.radio("Navigation", ["Upload Document", "Document Status", "Search Embeddings", "Chat with Documents"])
+page = st.sidebar.radio("Navigation", ["Upload Document", "Document Status", "Search Embeddings", "Chat with Documents", "Document Manager"])
 
 if page == "Upload Document":
     st.title("Upload Document for Processing")
@@ -689,6 +691,10 @@ elif page == "Search Embeddings":
 elif page == "Chat with Documents":
     # Display the chat interface
     chat_interface()
+
+elif page == "Document Manager":
+    # Display the document manager interface
+    document_manager_ui()
 
 
 # Footer
