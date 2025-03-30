@@ -7,6 +7,11 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Set, Union
 from uuid import UUID
 
+import anthropic  # For Claude
+# Import LLM providers (new)
+import openai
+from google.generativeai import GenerativeModel  # For Gemini
+
 from app.config.settings import settings
 from app.models.document import DocumentModel
 from app.services.document_processor import get_document
@@ -16,6 +21,170 @@ logger = logging.getLogger(__name__)
 
 # Path for storing chat sessions
 CHAT_SESSIONS_PATH = os.path.join(settings.UPLOAD_DIR, "chat_sessions.pkl")
+
+# LLM Provider base class (new)
+class LLMProvider:
+    """Base class for LLM providers."""
+    
+    def __init__(self, api_key: Optional[str] = None, **kwargs):
+        self.api_key = api_key
+        self.config = kwargs
+    
+    async def generate_completion(self, 
+                                 prompt: str, 
+                                 context: str, 
+                                 history: List[Dict[str, str]],
+                                 **kwargs) -> str:
+        """Generate a completion from the LLM."""
+        raise NotImplementedError("Subclasses must implement this method")
+
+
+# OpenAI Provider implementation (new)
+class OpenAIProvider(LLMProvider):
+    """OpenAI provider implementation."""
+    
+    def __init__(self, api_key: Optional[str] = None, **kwargs):
+        super().__init__(api_key, **kwargs)
+        self.client = openai.OpenAI(api_key=api_key or os.getenv("OPENAI_API_KEY"))
+        self.model = kwargs.get("model", "gpt-3.5-turbo")
+        
+    async def generate_completion(self, 
+                                 prompt: str, 
+                                 context: str, 
+                                 history: List[Dict[str, str]],
+                                 **kwargs) -> str:
+        """Generate a completion using OpenAI API."""
+        try:
+            # Format messages for OpenAI ChatCompletion
+            messages = []
+            
+            # System message with context
+            system_content = "You are a helpful assistant that answers questions based on the provided context."
+            if context:
+                system_content += f"\n\nContext information:\n{context}"
+            
+            messages.append({"role": "system", "content": system_content})
+            
+            # Add conversation history
+            for msg in history:
+                messages.append({"role": msg["role"], "content": msg["text"]})
+            
+            # Generate response
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=kwargs.get("temperature", 0.7),
+                max_tokens=kwargs.get("max_tokens", 1000)
+            )
+            
+            return response.choices[0].message.content
+        except Exception as e:
+            logger.exception(f"Error generating OpenAI completion: {str(e)}")
+            return f"I encountered an error while generating a response: {str(e)}"
+
+
+# Gemini Provider implementation (new)
+class GeminiProvider(LLMProvider):
+    """Google Gemini provider implementation."""
+    
+    def __init__(self, api_key: Optional[str] = None, **kwargs):
+        super().__init__(api_key, **kwargs)
+        import google.generativeai as genai
+        genai.configure(api_key=api_key or os.getenv("GOOGLE_API_KEY"))
+        self.model_name = kwargs.get("model", "gemini-pro")
+        self.model = GenerativeModel(self.model_name)
+        
+    async def generate_completion(self, 
+                                 prompt: str, 
+                                 context: str, 
+                                 history: List[Dict[str, str]],
+                                 **kwargs) -> str:
+        """Generate a completion using Google Gemini API."""
+        try:
+            # Format conversation for Gemini
+            chat = self.model.start_chat(history=[])
+            
+            # Add context as system message if available
+            if context:
+                system_message = f"Context information:\n{context}\n\nPlease answer based on this context."
+                chat.send_message(system_message, role="user")
+            
+            # Add conversation history
+            for msg in history:
+                role = "user" if msg["role"] == "user" else "model"
+                chat.send_message(msg["text"], role=role)
+                
+            # Get response to the current prompt
+            response = chat.send_message(prompt)
+            return response.text
+        except Exception as e:
+            logger.exception(f"Error generating Gemini completion: {str(e)}")
+            return f"I encountered an error while generating a response: {str(e)}"
+
+
+# Anthropic Claude Provider implementation (new)
+class ClaudeProvider(LLMProvider):
+    """Anthropic Claude provider implementation."""
+    
+    def __init__(self, api_key: Optional[str] = None, **kwargs):
+        super().__init__(api_key, **kwargs)
+        self.client = anthropic.Anthropic(api_key=api_key or os.getenv("ANTHROPIC_API_KEY"))
+        self.model = kwargs.get("model", "claude-3-sonnet-20240229")
+        
+    async def generate_completion(self, 
+                                 prompt: str, 
+                                 context: str, 
+                                 history: List[Dict[str, str]],
+                                 **kwargs) -> str:
+        """Generate a completion using Anthropic Claude API."""
+        try:
+            # Format messages for Claude
+            messages = []
+            
+            # Add context as system message if available
+            system_content = "You are a helpful assistant that answers questions based on the provided context."
+            if context:
+                system_content += f"\n\nContext information:\n{context}"
+            
+            # Add conversation history
+            for msg in history:
+                role = "user" if msg["role"] == "user" else "assistant"
+                messages.append({"role": role, "content": msg["text"]})
+            
+            # Generate response
+            response = self.client.messages.create(
+                model=self.model,
+                system=system_content,
+                messages=messages,
+                max_tokens=kwargs.get("max_tokens", 1000),
+                temperature=kwargs.get("temperature", 0.7)
+            )
+            
+            return response.content[0].text
+        except Exception as e:
+            logger.exception(f"Error generating Claude completion: {str(e)}")
+            return f"I encountered an error while generating a response: {str(e)}"
+
+
+# LLM Factory to get the appropriate provider (new)
+class LLMFactory:
+    """Factory for creating LLM providers."""
+    
+    @staticmethod
+    def get_provider(provider_name: str, **kwargs) -> LLMProvider:
+        """Get the appropriate LLM provider."""
+        providers = {
+            "openai": OpenAIProvider,
+            "gemini": GeminiProvider,
+            "claude": ClaudeProvider
+        }
+        
+        provider_class = providers.get(provider_name.lower())
+        if not provider_class:
+            logger.warning(f"Provider {provider_name} not found, falling back to OpenAI")
+            provider_class = OpenAIProvider
+            
+        return provider_class(**kwargs)
 
 class ChatMessage:
     """Represents a chat message in a conversation."""
@@ -70,7 +239,9 @@ class ChatSession:
         messages: Optional[List[ChatMessage]] = None,
         created_at: Optional[datetime] = None,
         updated_at: Optional[datetime] = None,
-        chat_mode: Optional[str] = None
+        chat_mode: Optional[str] = None,
+        llm_provider: Optional[str] = None,  # New: LLM provider name
+        llm_model: Optional[str] = None  # New: Specific model to use
     ):
         self.id = id or str(uuid.uuid4())
         self.name = name or f"Chat {self.id[:8]}"
@@ -87,6 +258,10 @@ class ChatSession:
         self.created_at = created_at or datetime.now()
         self.updated_at = updated_at or datetime.now()
         self.chat_mode = chat_mode or settings.CHAT_MODE
+        
+        # New attributes for flexible LLM selection
+        self.llm_provider = llm_provider or settings.DEFAULT_LLM_PROVIDER
+        self.llm_model = llm_model or settings.DEFAULT_LLM_MODEL
     
     def add_message(self, message: ChatMessage) -> None:
         """Add a message to the chat history."""
@@ -129,7 +304,9 @@ class ChatSession:
             "messages": [m.to_dict() for m in self.messages],
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
-            "chat_mode": self.chat_mode
+            "chat_mode": self.chat_mode,
+            "llm_provider": self.llm_provider,  # New field
+            "llm_model": self.llm_model  # New field
         }
     
     @classmethod
@@ -161,7 +338,9 @@ class ChatSession:
             messages=messages,
             created_at=created_at,
             updated_at=updated_at,
-            chat_mode=data.get("chat_mode", settings.CHAT_MODE)
+            chat_mode=data.get("chat_mode", settings.CHAT_MODE),
+            llm_provider=data.get("llm_provider", settings.DEFAULT_LLM_PROVIDER),  # New field
+            llm_model=data.get("llm_model", settings.DEFAULT_LLM_MODEL)  # New field
         )
 
 
@@ -212,11 +391,15 @@ class ChatService:
         name: Optional[str] = None, 
         document_id: Optional[str] = None,
         document_ids: Optional[List[str]] = None,
-        chat_mode: Optional[str] = None
+        chat_mode: Optional[str] = None,
+        llm_provider: Optional[str] = None,  # New parameter
+        llm_model: Optional[str] = None  # New parameter
     ) -> ChatSession:
         """Create a new chat session."""
         # Default to the settings value if not provided
         chat_mode = chat_mode or settings.CHAT_MODE
+        llm_provider = llm_provider or settings.DEFAULT_LLM_PROVIDER
+        llm_model = llm_model or settings.DEFAULT_LLM_MODEL
         
         # Convert string document_id to UUID if provided
         doc_id_uuid = None
@@ -244,11 +427,14 @@ class ChatService:
             name=name, 
             document_id=doc_id_uuid, 
             document_ids=doc_ids_uuid,
-            chat_mode=chat_mode
+            chat_mode=chat_mode,
+            llm_provider=llm_provider,
+            llm_model=llm_model
         )
         
         self.sessions[session.id] = session
         self._save_sessions()
+        
         return session
     
     def get_session(self, session_id: str) -> Optional[ChatSession]:
@@ -365,6 +551,7 @@ class ChatService:
                 documents.append(doc)
         
         # Generate response based on document embeddings if available
+        relevant_sections = []
         if documents:
             try:
                 all_results = []
@@ -397,7 +584,6 @@ class ChatService:
                     response_metadata["results"] = top_results
                     
                     # Extract the most relevant chunks
-                    relevant_sections = []
                     for idx, result in enumerate(top_results):
                         text = result.get("text", "").strip()
                         relevance = 1 - result.get("distance", 0)
@@ -415,66 +601,44 @@ class ChatService:
                         
                         relevant_sections.append(f"[Relevance: {relevance:.2f}{source_str}]\n{text}")
                     
-                    # Combine results into a coherent response
-                    all_text = "\n\n".join(relevant_sections)
-                    
-                    # Get document titles for the response
-                    doc_titles = [doc.original_filename for doc in documents]
-                    
-                    # Format a user-friendly response
-                    if len(documents) == 1:
-                        doc_info = f"document '{doc_titles[0]}'"
-                    else:
-                        if len(doc_titles) == 2:
-                            doc_info = f"documents '{doc_titles[0]}' and '{doc_titles[1]}'"
-                        else:
-                            # Format document titles with quotes and join them
-                            quoted_titles = ["'" + title + "'" for title in doc_titles[:-1]]
-                            doc_info = f"documents {', '.join(quoted_titles)}, and '{doc_titles[-1]}'"
-                    
-                    # Choose response format based on chat mode
-                    if session.chat_mode == "assistant":
-                        # More conversational assistant-style response
-                        response_text = (
-                            f"Based on the {doc_info}, here's what I found:\n\n"
-                            f"{all_text}\n\n"
-                            f"Is there anything specific you'd like me to explain further?"
-                        )
-                    else:
-                        # More raw, completion-style response with sources shown
-                        response_text = (
-                            f"Based on your query, I found the following information in the {doc_info}:\n\n"
-                            f"{all_text}\n\n"
-                            f"Is there anything specific you'd like to know more about?"
-                        )
-                else:
-                    doc_titles = [doc.original_filename for doc in documents]
-                    if len(documents) == 1:
-                        doc_info = f"document '{doc_titles[0]}'"
-                    else:
-                        if len(doc_titles) == 2:
-                            doc_info = f"documents '{doc_titles[0]}' and '{doc_titles[1]}'"
-                        else:
-                            # Format document titles with quotes and join them
-                            quoted_titles = ["'" + title + "'" for title in doc_titles[:-1]]
-                            doc_info = f"documents {', '.join(quoted_titles)}, and '{doc_titles[-1]}'"
-                    
-                    response_text = (
-                        f"I couldn't find any relevant information about '{message_text}' "
-                        f"in the {doc_info}. "
-                        f"Could you try rephrasing your question or asking about a different topic?"
-                    )
             except Exception as e:
-                logger.exception(f"Error generating response: {str(e)}")
-                response_text = (
-                    f"I'm sorry, I encountered an error while processing your question. "
-                    f"Please try again or ask a different question."
-                )
-        else:
-            # Generate a generic response for sessions without documents
+                logger.exception(f"Error retrieving relevant sections: {str(e)}")
+                relevant_sections = []
+        
+        # Create concatenated context from relevant sections
+        context_text = ""
+        if relevant_sections:
+            context_text = "Here are the most relevant sections from the documents:\n\n" + "\n\n".join(relevant_sections)
+        
+        # Format previous conversation into a list of messages
+        history = [msg.to_dict() for msg in recent_messages]
+        
+        try:
+            # Get the appropriate LLM provider based on session settings
+            provider = LLMFactory.get_provider(
+                provider_name=session.llm_provider,
+                model=session.llm_model,
+                api_key=None  # Use environment variable
+            )
+            
+            # Generate response using the provider
+            response_text = await provider.generate_completion(
+                prompt=message_text,
+                context=context_text,
+                history=history,
+                temperature=0.7,
+                max_tokens=1000
+            )
+            
+            # If response is empty, generate a fallback response
+            if not response_text:
+                response_text = "I couldn't generate a response. Please try rephrasing your question."
+                
+        except Exception as e:
+            logger.exception(f"Error generating response: {str(e)}")
             response_text = (
-                f"I don't have any documents to reference for this chat session. "
-                f"Please add one or more documents to the chat, or ask me a general question."
+                f"I'm sorry, I encountered an error while processing your question: {str(e)}. "
+                f"Please try again or ask a different question."
             )
         
         # Create and add the assistant's response

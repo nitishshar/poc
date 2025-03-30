@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import enum
 import io
@@ -5,6 +6,7 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 import uuid
 from datetime import datetime
@@ -17,6 +19,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import requests
 import streamlit as st
+import websockets
 from PIL import Image
 
 from app.config.settings import settings
@@ -33,6 +36,29 @@ if "current_session_cache" not in st.session_state:
     
 if "show_new_chat_form" not in st.session_state:
     st.session_state.show_new_chat_form = False
+
+# WebSocket connection state
+if "ws_connection" not in st.session_state:
+    st.session_state.ws_connection = None
+    
+if "ws_messages" not in st.session_state:
+    st.session_state.ws_messages = {}
+
+# Available LLM providers and models
+LLM_PROVIDERS = {
+    "openai": {
+        "display_name": "OpenAI",
+        "models": ["gpt-3.5-turbo", "gpt-4", "gpt-4-turbo"]
+    },
+    "gemini": {
+        "display_name": "Google Gemini",
+        "models": ["gemini-pro", "gemini-1.5-pro"]
+    },
+    "claude": {
+        "display_name": "Anthropic Claude",
+        "models": ["claude-3-opus", "claude-3-sonnet", "claude-3-haiku"]
+    }
+}
 
 # Create a ResponseType enum here to avoid import issues
 class ResponseType(Enum):
@@ -618,9 +644,36 @@ def create_direct_chat_session(key_prefix="topbar"):
     # Simple inputs for a more direct approach - use key_prefix to make keys unique
     direct_name = st.text_input("Session Name", value="Quick Chat", key=f"{key_prefix}_direct_name")
     
+    # LLM provider selection
+    provider_options = [(key, data["display_name"]) for key, data in LLM_PROVIDERS.items()]
+    
+    selected_provider = st.selectbox(
+        "LLM Provider",
+        options=provider_options,
+        format_func=lambda x: x[1],
+        key=f"{key_prefix}_provider_select",
+        index=0
+    )[0]
+    
+    # Model selection based on provider
+    available_models = LLM_PROVIDERS[selected_provider]["models"]
+    selected_model = st.selectbox(
+        "Model",
+        options=available_models,
+        key=f"{key_prefix}_model_select",
+        index=0
+    )
+    
+    # Add tooltip to explain the provider options
+    st.info(f"""
+    Selected provider: **{LLM_PROVIDERS[selected_provider]['display_name']}** with model **{selected_model}**
+    
+    You can change the API keys in the environment variables or settings page.
+    """)
+    
     # Update the chat mode radio to make it clearer these are OpenAI options
     direct_mode = st.radio(
-        "OpenAI API Mode",
+        "API Mode",
         options=[
             ("completion", "Chat Completions API"),
             ("assistant", "Assistant API")
@@ -714,7 +767,9 @@ def create_direct_chat_session(key_prefix="topbar"):
                 # Build a minimal payload
                 payload = {
                     "name": direct_name,
-                    "chat_mode": direct_mode
+                    "chat_mode": direct_mode,
+                    "llm_provider": selected_provider,
+                    "llm_model": selected_model
                 }
                 
                 # Format document IDs 
@@ -1275,19 +1330,32 @@ def render_chat_page():
     # Right column: Chat interface (simplified like the example)
     with chat_cols[1]:
         if st.session_state.current_session_id and current_session:
-            st.header(f"Chat: {current_session['name']}")
+            # Get session details
+            session_name = current_session.get('name', 'Unnamed Chat')
+            chat_mode = current_session.get('chat_mode', settings.CHAT_MODE)
+            document_ids = current_session.get('document_ids', [])
+            provider = current_session.get('llm_provider', settings.DEFAULT_LLM_PROVIDER)
+            model = current_session.get('llm_model', settings.DEFAULT_LLM_MODEL)
+            
+            if not document_ids and current_session.get('document_id'):
+                document_ids = [current_session['document_id']]
+                
+            # Add a status indicator for real-time connection
+            if settings.USE_WEBSOCKET_CHAT:
+                if "ws_connection" in st.session_state and st.session_state.ws_connection:
+                    st.success("⚡ Using real-time connection")
+                else:
+                    st.info("🔄 Using standard connection")
+            
+            # Display session header with model info
+            st.header(f"Chat: {session_name}")
             
             # Display basic chat info
-            chat_mode = current_session.get("chat_mode", settings.CHAT_MODE)
-            document_ids = current_session.get("document_ids", [])
-            if not document_ids and current_session.get("document_id"):
-                document_ids = [current_session["document_id"]]
-                
-            # Display info in a more compact way
             info_cols = st.columns(3)
             with info_cols[0]:
-                mode_display = "OpenAI Chat Completions" if chat_mode == "completion" else "OpenAI Assistant"
-                st.markdown(f"**Mode:** {mode_display}")
+                # Display LLM provider and model
+                provider_display = LLM_PROVIDERS.get(provider, {}).get("display_name", provider)
+                st.markdown(f"**Model:** {provider_display} - {model}")
             with info_cols[1]:
                 st.markdown(f"**Documents:** {len(document_ids)}")
             with info_cols[2]:
@@ -1296,40 +1364,47 @@ def render_chat_page():
                     if "current_session_cache" in st.session_state:
                         del st.session_state.current_session_cache
             
-            # Display messages - SIMPLIFIED APPROACH following the example
+            # Display messages using the chat message container for a better look
             messages = current_session.get("messages", [])
             
-            # Display all messages
-            for message in messages:
-                with st.chat_message(message["role"]):
-                    st.markdown(message["text"])
+            # Setup message containers
+            message_placeholder = st.container()
+            with message_placeholder:
+                # Display all messages
+                for message in messages:
+                    with st.chat_message(message["role"]):
+                        st.markdown(message["text"])
             
-            # Chat input - SIMPLIFIED like the example
-            if prompt := st.chat_input("Type your message..."):
-                # Add user message to chat history and display immediately
+            # Chat input - use Streamlit's chat input for better UX
+            if user_input := st.chat_input("Type your message...", key="chat_input"):
+                # Add user message to the display immediately
                 with st.chat_message("user"):
-                    st.markdown(prompt)
+                    st.markdown(user_input)
                 
-                # Send message to backend and get response
-                with st.spinner("Thinking..."):
-                    updated_session = send_message(
+                # Use a spinner while waiting for response
+                with st.spinner("AI is thinking..."):
+                    # Send message with WebSocket or fallback to REST API
+                    response = ws_send_message(
                         st.session_state.current_session_id,
-                        prompt
+                        user_input,
+                        context_window=5
                     )
                     
-                    if updated_session:
-                        # Update session cache
-                        st.session_state.current_session_cache = updated_session
+                    if response and response.get("success"):
+                        # Display the AI response
+                        with st.chat_message("assistant"):
+                            ai_message = response.get("message", {})
+                            st.markdown(ai_message.get("text", ""))
                         
-                        # Get the assistant's response
-                        messages = updated_session.get("messages", [])
-                        if messages and messages[-1]["role"] == "assistant":
-                            with st.chat_message("assistant"):
-                                response = messages[-1]
-                                st.markdown(response["text"])
+                        # Update session state
+                        if "current_session_cache" in st.session_state:
+                            # Refresh the session cache
+                            current_session = get_chat_session(st.session_state.current_session_id)
+                            if current_session:
+                                st.session_state.current_session_cache = current_session
                     else:
                         st.error("Failed to get a response. Please try again.")
-        
+            
         elif st.session_state.current_session_id and not current_session:
             st.error("Error loading chat session. The session may have been deleted.")
             
@@ -1354,6 +1429,119 @@ def render_chat_page():
             # Add a quick direct creation form
             st.markdown("### Create New Chat Session")
             create_direct_chat_session(key_prefix="main")
+
+
+# WebSocket Helper Functions
+def get_ws_url(session_id):
+    """Get WebSocket URL for a chat session."""
+    # Derive WebSocket URL from API_BASE_URL (replacing http with ws)
+    base_url = API_BASE_URL.replace("http://", "ws://").replace("https://", "wss://")
+    return f"{base_url}/chat/ws/{session_id}"
+
+async def connect_websocket(session_id):
+    """Connect to WebSocket for a chat session."""
+    ws_url = get_ws_url(session_id)
+    try:
+        connection = await websockets.connect(ws_url)
+        # Store session data
+        if session_id not in st.session_state.ws_messages:
+            st.session_state.ws_messages[session_id] = []
+        return connection
+    except Exception as e:
+        print(f"Error connecting to WebSocket: {str(e)}")
+        st.error(f"Could not establish real-time connection. Falling back to REST API.")
+        return None
+
+async def send_message_ws(websocket, message, context_window=5):
+    """Send a message via WebSocket."""
+    if not websocket:
+        return None
+        
+    try:
+        # Prepare message data
+        data = {
+            "message": message,
+            "context_window": context_window
+        }
+        
+        # Send the message
+        await websocket.send(json.dumps(data))
+        
+        # Wait for and process responses
+        while True:
+            try:
+                response = await asyncio.wait_for(websocket.recv(), timeout=0.1)
+                data = json.loads(response)
+                
+                # Store the message in session state for display
+                if data.get("type") == "message" and data.get("status") == "complete":
+                    st.session_state.ws_messages[websocket.path.split("/")[-1]].append(data["message"])
+                    return data["message"]
+                    
+                # Update session data if provided
+                if data.get("type") == "session_data":
+                    st.session_state.current_session_cache = data["data"]
+                    
+                # Handle errors
+                if data.get("type") == "error":
+                    st.error(f"Error: {data.get('error')}")
+                    return None
+                    
+            except asyncio.TimeoutError:
+                # No message received, continue listening
+                await asyncio.sleep(0.1)
+                continue
+                
+    except Exception as e:
+        print(f"Error sending message via WebSocket: {str(e)}")
+        st.error(f"Communication error. Falling back to REST API.")
+        return None
+
+def ws_send_message(session_id, message, context_window=5):
+    """Send a message using WebSocket or fallback to REST API."""
+    # Check if we have websocket support enabled
+    if settings.USE_WEBSOCKET_CHAT:
+        # Try using WebSocket
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            # Connect if not connected
+            if "ws_connection" not in st.session_state or not st.session_state.ws_connection:
+                st.session_state.ws_connection = loop.run_until_complete(connect_websocket(session_id))
+            
+            # Send message if connected
+            if st.session_state.ws_connection:
+                result = loop.run_until_complete(send_message_ws(
+                    st.session_state.ws_connection, 
+                    message, 
+                    context_window
+                ))
+                
+                if result:
+                    return {"success": True, "message": result}
+            
+        except Exception as e:
+            print(f"WebSocket error: {str(e)}")
+            st.warning("Real-time connection failed. Using standard connection instead.")
+            # Close websocket if open
+            if "ws_connection" in st.session_state and st.session_state.ws_connection:
+                try:
+                    loop.run_until_complete(st.session_state.ws_connection.close())
+                except:
+                    pass
+                st.session_state.ws_connection = None
+    
+    # Fallback to REST API
+    response = send_message(session_id, message, context_window)
+    
+    if response:
+        # Get the assistant's response from updated messages
+        messages = response.get("messages", [])
+        if messages and messages[-1]["role"] == "assistant":
+            return {"success": True, "message": messages[-1]}
+    
+    return {"success": False, "error": "Failed to send message"}
 
 
 if __name__ == "__main__":

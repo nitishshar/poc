@@ -43,7 +43,8 @@ class Settings(BaseSettings):
     
     # Processing Settings
     MAX_WORKERS: int = int(os.getenv("MAX_WORKERS", "4"))
-    TIMEOUT: int = int(os.getenv("TIMEOUT", "3600"))  # in seconds
+    # Timeout in seconds
+    TIMEOUT: int = int(os.getenv("TIMEOUT", "3600"))
     
     # Streamlit Settings
     STREAMLIT_HOST: str = os.getenv("STREAMLIT_HOST", "localhost")
@@ -55,6 +56,20 @@ class Settings(BaseSettings):
     ENABLE_MULTI_DOCUMENT_CHAT: bool = os.getenv("ENABLE_MULTI_DOCUMENT_CHAT", "True").lower() in ("true", "1", "t")
     CHAT_MODE: str = os.getenv("CHAT_MODE", "completion")  # Options: 'completion' or 'assistant'
     MAX_DOCUMENTS_PER_CHAT: int = int(os.getenv("MAX_DOCUMENTS_PER_CHAT", "5"))
+    
+    # New LLM Provider Settings
+    DEFAULT_LLM_PROVIDER: str = os.getenv("DEFAULT_LLM_PROVIDER", "openai")  # Options: 'openai', 'gemini', 'claude', etc.
+    DEFAULT_LLM_MODEL: str = os.getenv("DEFAULT_LLM_MODEL", "gpt-3.5-turbo")  # Default model for the provider
+    
+    # LLM API Keys (can be overridden with environment variables)
+    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+    GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY", "")  # For Gemini
+    ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")  # For Claude
+    
+    # Streamlit UI Performance Settings
+    USE_WEBSOCKET_CHAT: bool = os.getenv("USE_WEBSOCKET_CHAT", "False").lower() in ("true", "1", "t")  # Use WebSockets for real-time chat
+    CACHE_DOCUMENT_LIST: bool = os.getenv("CACHE_DOCUMENT_LIST", "True").lower() in ("true", "1", "t")
+    DOCUMENT_CACHE_TTL: int = int(os.getenv("DOCUMENT_CACHE_TTL", "30"))  # seconds
     
     model_config = {
         "case_sensitive": True,

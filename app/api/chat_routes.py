@@ -1,8 +1,9 @@
+import json
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from fastapi import (APIRouter, BackgroundTasks, Body, Depends, HTTPException,
-                     Path, Query)
+                     Path, Query, WebSocket, WebSocketDisconnect)
 from pydantic import BaseModel, Field
 
 from app.config.settings import settings
@@ -31,19 +32,23 @@ class ChatSessionModel(BaseModel):
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     chat_mode: Optional[str] = None
+    llm_provider: Optional[str] = None
+    llm_model: Optional[str] = None
 
 
 class ChatMessageRequest(BaseModel):
-    """Request model for sending a chat message."""
+    """Pydantic model for chat message requests."""
     text: str
 
 
-class ChatSessionCreateRequest(BaseModel):
-    """Request model for creating a chat session."""
+class ChatSessionRequest(BaseModel):
+    """Pydantic model for chat session creation requests."""
     name: Optional[str] = None
     document_id: Optional[str] = None
     document_ids: Optional[List[str]] = None
     chat_mode: Optional[str] = None
+    llm_provider: Optional[str] = None
+    llm_model: Optional[str] = None
 
 
 class DocumentUpdateRequest(BaseModel):
@@ -51,43 +56,10 @@ class DocumentUpdateRequest(BaseModel):
     document_id: str
 
 
-@router.post("/sessions", response_model=ChatSessionModel)
-async def create_chat_session(
-    request: ChatSessionCreateRequest = Body(...)
-):
-    """Create a new chat session."""
-    # Validate document_id if provided
-    if request.document_id:
-        document = get_document(request.document_id)
-        if not document:
-            raise HTTPException(status_code=404, detail=f"Document with ID {request.document_id} not found")
-    
-    # Validate document_ids if provided
-    if request.document_ids:
-        for doc_id in request.document_ids:
-            document = get_document(doc_id)
-            if not document:
-                raise HTTPException(status_code=404, detail=f"Document with ID {doc_id} not found")
-    
-    # Validate chat_mode if provided
-    if request.chat_mode and request.chat_mode not in ["completion", "assistant"]:
-        raise HTTPException(status_code=400, detail=f"Invalid chat mode: {request.chat_mode}. Must be 'completion' or 'assistant'")
-    
-    # Create a session
-    session = chat_service.create_session(
-        document_id=request.document_id,
-        document_ids=request.document_ids,
-        name=request.name,
-        chat_mode=request.chat_mode
-    )
-    
-    return ChatSessionModel(**session.to_dict())
-
-
 @router.get("/sessions", response_model=List[ChatSessionModel])
 async def get_chat_sessions():
     """Get all chat sessions."""
-    sessions = chat_service.get_all_sessions()
+    sessions = chat_service.get_sessions()
     return [ChatSessionModel(**session.to_dict()) for session in sessions]
 
 
@@ -97,18 +69,30 @@ async def get_chat_session(session_id: str = Path(..., description="The ID of th
     session = chat_service.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail=f"Chat session with ID {session_id} not found")
-    
     return ChatSessionModel(**session.to_dict())
 
 
-@router.delete("/sessions/{session_id}")
+@router.post("/sessions", response_model=ChatSessionModel)
+async def create_chat_session(request: ChatSessionRequest = Body(...)):
+    """Create a new chat session."""
+    session = chat_service.create_session(
+        name=request.name,
+        document_id=request.document_id,
+        document_ids=request.document_ids,
+        chat_mode=request.chat_mode,
+        llm_provider=request.llm_provider,
+        llm_model=request.llm_model
+    )
+    return ChatSessionModel(**session.to_dict())
+
+
+@router.delete("/sessions/{session_id}", response_model=Dict[str, Any])
 async def delete_chat_session(session_id: str = Path(..., description="The ID of the chat session")):
     """Delete a chat session."""
     success = chat_service.delete_session(session_id)
     if not success:
         raise HTTPException(status_code=404, detail=f"Chat session with ID {session_id} not found")
-    
-    return {"message": f"Chat session {session_id} deleted successfully"}
+    return {"success": True, "message": f"Chat session with ID {session_id} deleted"}
 
 
 @router.post("/sessions/{session_id}/documents", response_model=ChatSessionModel)
@@ -186,4 +170,121 @@ async def get_messages(
     if limit and limit < len(messages):
         messages = messages[-limit:]
     
-    return [ChatMessageModel(**message.to_dict()) for message in messages] 
+    return [ChatMessageModel(**message.to_dict()) for message in messages]
+
+
+# Add WebSocket endpoint for real-time chat
+@router.websocket("/ws/{session_id}")
+async def websocket_chat(websocket: WebSocket, session_id: str):
+    """Real-time chat via WebSocket."""
+    await websocket.accept()
+    
+    try:
+        # Validate session exists
+        session = chat_service.get_session(session_id)
+        if not session:
+            await websocket.send_json({
+                "error": f"Chat session with ID {session_id} not found",
+                "status": "error"
+            })
+            await websocket.close()
+            return
+            
+        # Send initial session data
+        await websocket.send_json({
+            "type": "session_data",
+            "data": session.to_dict()
+        })
+        
+        # Listen for messages
+        while True:
+            # Receive message from WebSocket
+            data = await websocket.receive_text()
+            
+            try:
+                # Parse received data
+                message_data = json.loads(data)
+                user_message = message_data.get("message", "")
+                context_window = message_data.get("context_window", 5)
+                
+                if not user_message:
+                    await websocket.send_json({
+                        "type": "error",
+                        "error": "No message provided",
+                        "status": "error"
+                    })
+                    continue
+                
+                # Send acknowledgment that message was received
+                await websocket.send_json({
+                    "type": "status",
+                    "status": "processing",
+                    "message": "Processing your message..."
+                })
+                
+                # Add user message to the session
+                user_chat_message = ChatMessage(text=user_message, role="user")
+                session.add_message(user_chat_message)
+                
+                # Send user message confirmation
+                await websocket.send_json({
+                    "type": "message",
+                    "message": user_chat_message.to_dict(),
+                    "status": "received"
+                })
+                
+                # Generate response asynchronously
+                updated_session = await chat_service.generate_response(
+                    session_id, 
+                    user_message,
+                    context_window
+                )
+                
+                if updated_session and updated_session.messages:
+                    # Get the latest assistant message
+                    latest_message = updated_session.messages[-1]
+                    
+                    # Send the assistant's response
+                    await websocket.send_json({
+                        "type": "message",
+                        "message": latest_message.to_dict(),
+                        "status": "complete"
+                    })
+                    
+                    # Send updated session data
+                    await websocket.send_json({
+                        "type": "session_data",
+                        "data": updated_session.to_dict()
+                    })
+                else:
+                    await websocket.send_json({
+                        "type": "error",
+                        "error": "Failed to generate response",
+                        "status": "error"
+                    })
+                    
+            except json.JSONDecodeError:
+                await websocket.send_json({
+                    "type": "error",
+                    "error": "Invalid JSON format",
+                    "status": "error"
+                })
+            except Exception as e:
+                await websocket.send_json({
+                    "type": "error",
+                    "error": f"Error processing message: {str(e)}",
+                    "status": "error"
+                })
+                
+    except WebSocketDisconnect:
+        print(f"WebSocket client disconnected from session {session_id}")
+    except Exception as e:
+        print(f"WebSocket error: {str(e)}")
+        try:
+            await websocket.send_json({
+                "type": "error",
+                "error": f"Server error: {str(e)}",
+                "status": "error"
+            })
+        except:
+            pass 
