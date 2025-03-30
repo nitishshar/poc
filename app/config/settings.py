@@ -1,6 +1,7 @@
 import os
-from pydantic_settings import BaseSettings
+
 from dotenv import load_dotenv
+from pydantic_settings import BaseSettings
 
 # Load environment variables from .env file
 load_dotenv()
@@ -47,6 +48,13 @@ class Settings(BaseSettings):
     # Streamlit Settings
     STREAMLIT_HOST: str = os.getenv("STREAMLIT_HOST", "localhost")
     STREAMLIT_PORT: int = int(os.getenv("STREAMLIT_PORT", "8501"))
+    
+    # Chat Settings
+    PERSIST_DOCUMENTS: bool = os.getenv("PERSIST_DOCUMENTS", "True").lower() in ("true", "1", "t")
+    PERSIST_CHAT_SESSIONS: bool = os.getenv("PERSIST_CHAT_SESSIONS", "True").lower() in ("true", "1", "t")
+    ENABLE_MULTI_DOCUMENT_CHAT: bool = os.getenv("ENABLE_MULTI_DOCUMENT_CHAT", "True").lower() in ("true", "1", "t")
+    CHAT_MODE: str = os.getenv("CHAT_MODE", "completion")  # Options: 'completion' or 'assistant'
+    MAX_DOCUMENTS_PER_CHAT: int = int(os.getenv("MAX_DOCUMENTS_PER_CHAT", "5"))
     
     model_config = {
         "case_sensitive": True,

@@ -1,31 +1,51 @@
-import os
 import asyncio
+import json
 import logging
+import os
+import pickle
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from app.config.settings import settings
-from app.models.document import (
-    DocumentModel, DocumentStatus, ProcessingStep,
-    ProcessingStepInfo, StepStatus, TextChunk, TableInfo
-)
-from app.services.extractors import (
-    extract_text_from_pdf,
-    extract_text_from_docx,
-    extract_text_from_txt,
-    extract_text_from_csv,
-    perform_ocr,
-    extract_tables
-)
-from app.services.metadata import extract_metadata
+from app.models.document import (DocumentModel, DocumentStatus, ProcessingStep,
+                                 ProcessingStepInfo, StepStatus, TableInfo,
+                                 TextChunk)
 from app.services.chunking import chunk_text
-from app.services.embedding import generate_embeddings, delete_collection
+from app.services.embedding import delete_collection, generate_embeddings
+from app.services.extractors import (extract_tables, extract_text_from_csv,
+                                     extract_text_from_docx,
+                                     extract_text_from_pdf,
+                                     extract_text_from_txt, perform_ocr)
+from app.services.metadata import extract_metadata
 
 logger = logging.getLogger(__name__)
 
 # Dictionary to track processing documents
 document_store: Dict[UUID, DocumentModel] = {}
+DOCUMENT_STORE_PATH = os.path.join(settings.UPLOAD_DIR, "document_store.pkl")
+
+# Initialize document store from disk if available
+def _load_document_store():
+    """Load document store from disk if available."""
+    global document_store
+    try:
+        if os.path.exists(DOCUMENT_STORE_PATH):
+            with open(DOCUMENT_STORE_PATH, 'rb') as f:
+                loaded_store = pickle.load(f)
+                if isinstance(loaded_store, dict):
+                    document_store = loaded_store
+                    logger.info(f"Loaded {len(document_store)} documents from {DOCUMENT_STORE_PATH}")
+                else:
+                    logger.error(f"Invalid document store format in {DOCUMENT_STORE_PATH}")
+    except Exception as e:
+        logger.error(f"Error loading document store: {str(e)}")
+        # Ensure the upload directory exists
+        os.makedirs(os.path.dirname(DOCUMENT_STORE_PATH), exist_ok=True)
+
+# Load documents at module initialization
+_load_document_store()
 
 
 async def process_document(document_id: UUID) -> DocumentModel:
@@ -215,12 +235,28 @@ async def _update_step_status(
 
 
 def _update_document_store(document: DocumentModel) -> None:
-    """Update the document in the document store."""
+    """Update the document in the document store and persist to disk."""
     document_store[document.id] = document
+    _save_document_store()
+
+
+def _save_document_store():
+    """Save the document store to disk."""
+    try:
+        # Ensure the directory exists
+        os.makedirs(os.path.dirname(DOCUMENT_STORE_PATH), exist_ok=True)
+        
+        with open(DOCUMENT_STORE_PATH, 'wb') as f:
+            pickle.dump(document_store, f)
+    except Exception as e:
+        logger.error(f"Error saving document store: {str(e)}")
 
 
 def get_document(document_id: UUID) -> Optional[DocumentModel]:
     """Get a document from the document store."""
+    # check if document_id is a string then convert else use as is
+    if isinstance(document_id, str):
+        document_id = UUID(document_id)
     return document_store.get(document_id)
 
 
@@ -253,6 +289,7 @@ def delete_document(document_id: UUID) -> bool:
         
         # Delete the document from the store
         del document_store[document_id]
+        _save_document_store()
         return True
     except Exception as e:
         logger.exception(f"Error deleting document: {str(e)}")
@@ -262,6 +299,7 @@ def delete_document(document_id: UUID) -> bool:
 def save_document(document: DocumentModel) -> DocumentModel:
     """Save a document to the document store."""
     document_store[document.id] = document
+    _save_document_store()
     return document
 
 

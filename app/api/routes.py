@@ -1,24 +1,28 @@
 import os
 import shutil
+import urllib.request
 from datetime import datetime
+from pathlib import Path
 from typing import List, Optional
 from uuid import UUID
-import urllib.request
-from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, BackgroundTasks, Query, Path as PathParam, Form, Body
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi import (APIRouter, BackgroundTasks, Body, Depends, File, Form,
+                     HTTPException)
+from fastapi import Path as PathParam
+from fastapi import Query, UploadFile
+from fastapi.responses import FileResponse, JSONResponse
 
 from app.config.settings import settings
-from app.models.document import (
-    DocumentModel, DocumentResponse, DocumentUploadResponse, DocumentStatus,
-    ProcessingStep, StepStatus, TextChunk, TableInfo, DocumentUploadRequest
-)
-from app.services.document_processor import (
-    process_document, get_document, save_document, calculate_processing_progress,
-    list_documents, delete_document as delete_doc_from_store
-)
-from app.services.embedding import query_embeddings, get_collection_info
+from app.models.document import (DocumentModel, DocumentResponse,
+                                 DocumentStatus, DocumentUploadRequest,
+                                 DocumentUploadResponse, ProcessingStep,
+                                 StepStatus, TableInfo, TextChunk)
+from app.services.document_processor import calculate_processing_progress
+from app.services.document_processor import \
+    delete_document as delete_doc_from_store
+from app.services.document_processor import (get_document, list_documents,
+                                             process_document, save_document)
+from app.services.embedding import get_collection_info, query_embeddings
 
 router = APIRouter(prefix=settings.API_V1_STR)
 
@@ -252,7 +256,7 @@ async def batch_upload_documents(
 
 
 @router.get("/documents/{document_id}", response_model=DocumentResponse)
-async def get_document_status(document_id: UUID = Path(..., description="The ID of the document")):
+async def get_document_status(document_id: UUID = PathParam(..., description="The ID of the document")):
     """
     Get the processing status of a document.
     
@@ -294,7 +298,7 @@ async def get_document_status(document_id: UUID = Path(..., description="The ID 
 
 @router.post("/documents/{document_id}/process")
 async def start_document_processing(
-    document_id: UUID = Path(..., description="The ID of the document"),
+    document_id: UUID = PathParam(..., description="The ID of the document"),
     background_tasks: BackgroundTasks = None
 ):
     """
@@ -339,7 +343,7 @@ async def start_document_processing(
 
 @router.get("/documents/{document_id}/content", response_model=List[TextChunk])
 async def get_document_content(
-    document_id: UUID = Path(..., description="The ID of the document"),
+    document_id: UUID = PathParam(..., description="The ID of the document"),
     page: Optional[int] = Query(None, description="Filter by page number"),
     section: Optional[str] = Query(None, description="Filter by section title")
 ):
@@ -379,7 +383,7 @@ async def get_document_content(
 
 @router.get("/documents/{document_id}/tables", response_model=List[TableInfo])
 async def get_document_tables(
-    document_id: UUID = Path(..., description="The ID of the document"),
+    document_id: UUID = PathParam(..., description="The ID of the document"),
     page: Optional[int] = Query(None, description="Filter by page number")
 ):
     """
@@ -414,7 +418,7 @@ async def get_document_tables(
 
 @router.get("/documents/{document_id}/embeddings")
 async def get_document_embeddings(
-    document_id: UUID = Path(..., description="The ID of the document"),
+    document_id: UUID = PathParam(..., description="The ID of the document"),
     query: str = Query(..., description="Query text to search for"),
     limit: int = Query(5, description="Number of results to return"),
     page: Optional[int] = Query(None, description="Filter by page number")
@@ -468,7 +472,7 @@ async def get_document_embeddings(
 
 
 @router.get("/documents/{document_id}/original")
-async def download_original_document(document_id: UUID = Path(..., description="The ID of the document")):
+async def download_original_document(document_id: UUID = PathParam(..., description="The ID of the document")):
     """
     Download the original document.
     
@@ -533,8 +537,8 @@ async def get_all_documents():
     return response
 
 
-@router.delete("/documents/{document_id}")
-async def delete_document(document_id: UUID = Path(..., description="The ID of the document")):
+@router.delete("/documents/{document_id}", status_code=204)
+async def delete_document(document_id: UUID = PathParam(..., description="The ID of the document")):
     """
     Delete a document.
     

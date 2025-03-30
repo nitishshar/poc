@@ -1,11 +1,13 @@
-from typing import Dict, List, Optional, Any
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Query, Path, Body
-from pydantic import BaseModel, Field
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from app.services.chat_service import chat_service, ChatMessage
-from app.services.document_processor import get_document
+from fastapi import (APIRouter, BackgroundTasks, Body, Depends, HTTPException,
+                     Path, Query)
+from pydantic import BaseModel, Field
+
 from app.config.settings import settings
+from app.services.chat_service import ChatMessage, chat_service
+from app.services.document_processor import get_document
 
 router = APIRouter(prefix=f"{settings.API_V1_STR}/chat")
 
@@ -24,9 +26,11 @@ class ChatSessionModel(BaseModel):
     id: Optional[str] = None
     name: Optional[str] = None
     document_id: Optional[str] = None
+    document_ids: List[str] = Field(default_factory=list)
     messages: List[ChatMessageModel] = Field(default_factory=list)
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+    chat_mode: Optional[str] = None
 
 
 class ChatMessageRequest(BaseModel):
@@ -38,6 +42,13 @@ class ChatSessionCreateRequest(BaseModel):
     """Request model for creating a chat session."""
     name: Optional[str] = None
     document_id: Optional[str] = None
+    document_ids: Optional[List[str]] = None
+    chat_mode: Optional[str] = None
+
+
+class DocumentUpdateRequest(BaseModel):
+    """Request model for adding or removing a document from a chat session."""
+    document_id: str
 
 
 @router.post("/sessions", response_model=ChatSessionModel)
@@ -51,10 +62,23 @@ async def create_chat_session(
         if not document:
             raise HTTPException(status_code=404, detail=f"Document with ID {request.document_id} not found")
     
+    # Validate document_ids if provided
+    if request.document_ids:
+        for doc_id in request.document_ids:
+            document = get_document(doc_id)
+            if not document:
+                raise HTTPException(status_code=404, detail=f"Document with ID {doc_id} not found")
+    
+    # Validate chat_mode if provided
+    if request.chat_mode and request.chat_mode not in ["completion", "assistant"]:
+        raise HTTPException(status_code=400, detail=f"Invalid chat mode: {request.chat_mode}. Must be 'completion' or 'assistant'")
+    
     # Create a session
     session = chat_service.create_session(
         document_id=request.document_id,
-        name=request.name
+        document_ids=request.document_ids,
+        name=request.name,
+        chat_mode=request.chat_mode
     )
     
     return ChatSessionModel(**session.to_dict())
@@ -85,6 +109,49 @@ async def delete_chat_session(session_id: str = Path(..., description="The ID of
         raise HTTPException(status_code=404, detail=f"Chat session with ID {session_id} not found")
     
     return {"message": f"Chat session {session_id} deleted successfully"}
+
+
+@router.post("/sessions/{session_id}/documents", response_model=ChatSessionModel)
+async def add_document_to_session(
+    session_id: str = Path(..., description="The ID of the chat session"),
+    request: DocumentUpdateRequest = Body(...)
+):
+    """Add a document to a chat session."""
+    # Validate document exists
+    document = get_document(request.document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail=f"Document with ID {request.document_id} not found")
+    
+    # Check if multi-document chat is enabled
+    session = chat_service.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Chat session with ID {session_id} not found")
+    
+    if len(session.document_ids) >= settings.MAX_DOCUMENTS_PER_CHAT and not settings.ENABLE_MULTI_DOCUMENT_CHAT:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Multi-document chat is disabled or maximum documents per chat ({settings.MAX_DOCUMENTS_PER_CHAT}) reached"
+        )
+    
+    # Add document to session
+    updated_session = chat_service.add_document_to_session(session_id, request.document_id)
+    if not updated_session:
+        raise HTTPException(status_code=404, detail=f"Chat session with ID {session_id} not found")
+    
+    return ChatSessionModel(**updated_session.to_dict())
+
+
+@router.delete("/sessions/{session_id}/documents/{document_id}", response_model=ChatSessionModel)
+async def remove_document_from_session(
+    session_id: str = Path(..., description="The ID of the chat session"),
+    document_id: str = Path(..., description="The ID of the document to remove")
+):
+    """Remove a document from a chat session."""
+    updated_session = chat_service.remove_document_from_session(session_id, document_id)
+    if not updated_session:
+        raise HTTPException(status_code=404, detail=f"Chat session with ID {session_id} not found")
+    
+    return ChatSessionModel(**updated_session.to_dict())
 
 
 @router.post("/sessions/{session_id}/messages", response_model=ChatSessionModel)

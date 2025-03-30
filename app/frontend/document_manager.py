@@ -1,15 +1,25 @@
+import base64
 import os
 import time
+from datetime import datetime
+from urllib.parse import urljoin
+
+import pandas as pd
 import requests
 import streamlit as st
-from datetime import datetime
-import pandas as pd
-from urllib.parse import urljoin
-import base64
 
 # Configuration
 API_BASE_URL = os.environ.get("API_BASE_URL", "http://localhost:8000/api")
 
+# Ensure proper URL joining that preserves the /api path
+def join_api_url(base_url, path):
+    """Join API base URL with path, ensuring the /api part is preserved.
+    This handles the case where urllib.parse.urljoin might remove the /api path."""
+    # If the base URL doesn't end with a slash, and path starts with a slash,
+    # urljoin might discard the last path component of base_url
+    if not base_url.endswith('/'):
+        base_url = base_url + '/'
+    return urljoin(base_url, path.lstrip('/'))
 
 def format_size(size_bytes):
     """Format file size from bytes to human-readable format."""
@@ -35,7 +45,7 @@ def format_datetime(dt_str):
 def get_all_documents():
     """Get all documents from the API."""
     try:
-        response = requests.get(urljoin(API_BASE_URL, "/documents"))
+        response = requests.get(join_api_url(API_BASE_URL, "/documents"))
         response.raise_for_status()
         return response.json()
     except Exception as e:
@@ -46,7 +56,7 @@ def get_all_documents():
 def delete_document(document_id):
     """Delete a document from the API."""
     try:
-        response = requests.delete(urljoin(API_BASE_URL, f"/documents/{document_id}"))
+        response = requests.delete(join_api_url(API_BASE_URL, f"/documents/{document_id}"))
         response.raise_for_status()
         return True
     except Exception as e:
@@ -56,7 +66,7 @@ def delete_document(document_id):
 
 def download_original_document(document_id):
     """Download the original document."""
-    url = urljoin(API_BASE_URL, f"/documents/{document_id}/original")
+    url = join_api_url(API_BASE_URL, f"/documents/{document_id}/original")
     try:
         response = requests.get(url)
         response.raise_for_status()
