@@ -175,48 +175,296 @@ def format_datetime(dt_str):
 @st.cache_data(ttl=60)  # Cache for 1 minute
 def get_chat_sessions():
     """Get all chat sessions from the API."""
+    # Create a placeholder for displaying status
+    api_error_container = None
+    
+    # Add retry logic for server errors
+    max_retries = 3
+    retry_delay = 1  # seconds
+    
+    for attempt in range(1, max_retries + 1):
+        try:
+            url = join_api_url(API_BASE_URL, "/chat/sessions")
+            print(f"Fetching chat sessions from: {url} (attempt {attempt}/{max_retries})")
+            
+            response = requests.get(url, timeout=5)
+            
+            # Handle server errors with retries
+            if response.status_code == 500:
+                error_msg = f"Server error (attempt {attempt}/{max_retries}): {response.text[:200]}..."
+                print(error_msg)
+                
+                # Check if it's the specific AttributeError we're seeing
+                if "AttributeError: 'ChatService' object has no attribute 'get_sessions'" in response.text:
+                    error_message = ("Backend error: The chat service is missing the get_sessions method. "
+                                    "This is likely a backend code issue that needs to be fixed.")
+                    print(error_message)
+                    try:
+                        st.error(error_message)
+                    except:
+                        # If we're not in a Streamlit context, ignore the UI error
+                        pass
+                    # Return empty list instead of retrying - this won't be fixed with retries
+                    return []
+                    
+                if attempt < max_retries:
+                    print(f"Retrying in {retry_delay} seconds...")
+                    time.sleep(retry_delay)
+                    # Increase the delay for next retry (exponential backoff)
+                    retry_delay *= 2
+                    continue
+            
+            # Handle other non-200 status codes
+            if response.status_code != 200:
+                print(f"Non-200 response: {response.status_code} - {response.text[:200]}...")
+                
+                if attempt < max_retries and response.status_code >= 500:
+                    # Only retry for server errors (5xx)
+                    print(f"Retrying in {retry_delay} seconds...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2
+                    continue
+                
+                # If we reached here, we've either exhausted retries or got a non-retryable error
+                error_message = f"Error fetching chat sessions: {response.status_code} {response.reason}"
+                if response.status_code == 500:
+                    error_message += " - The server encountered an internal error. This might be temporary or require backend maintenance."
+                    
+                    # Add more specific advice for the AttributeError
+                    if "AttributeError: 'ChatService' object has no attribute 'get_sessions'" in response.text:
+                        error_message += "\n\nSpecific error: The chat service is missing the get_sessions method. This is a backend code issue."
+                        
+                elif response.status_code == 404:
+                    error_message += " - The chat sessions endpoint was not found. Check API configuration."
+                elif response.status_code == 401 or response.status_code == 403:
+                    error_message += " - Authentication or authorization issue. Check your credentials."
+                
+                # Show error in the UI - safely
+                print(error_message)
+                try:
+                    st.error(error_message)
+                except:
+                    # If we're not in a Streamlit context, ignore the UI error
+                    pass
+                
+                # Return an empty list to avoid breaking the UI
+                return []
+            
+            # Success! Parse and return the data
+            response.raise_for_status()
+            return response.json()
+            
+        except requests.Timeout:
+            error_msg = f"Request timed out on attempt {attempt}"
+            print(error_msg)
+            
+            if attempt < max_retries:
+                print(f"Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+                retry_delay *= 2
+            else:
+                error_message = "Error fetching chat sessions: Request timed out. The server might be under heavy load or unreachable."
+                print(error_message)
+                try:
+                    st.error(error_message)
+                except:
+                    # If we're not in a Streamlit context, ignore the UI error
+                    pass
+                return []
+                
+        except requests.ConnectionError:
+            error_msg = f"Connection error on attempt {attempt}"
+            print(error_msg)
+            
+            if attempt < max_retries:
+                print(f"Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+                retry_delay *= 2
+            else:
+                error_message = "Error fetching chat sessions: Connection failed. Please check if the API server is running."
+                print(error_message)
+                try:
+                    st.error(error_message)
+                except:
+                    # If we're not in a Streamlit context, ignore the UI error
+                    pass
+                return []
+                
+        except Exception as e:
+            error_msg = f"Unexpected error on attempt {attempt}: {str(e)}"
+            print(error_msg)
+            
+            if attempt < max_retries:
+                print(f"Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+                retry_delay *= 2
+            else:
+                error_message = f"Error fetching chat sessions: {str(e)}"
+                print(error_message)
+                try:
+                    st.error(error_message)
+                except:
+                    # If we're not in a Streamlit context, ignore the UI error
+                    pass
+                import traceback
+                print(traceback.format_exc())
+                return []
+    
+    # If we reach here, all retries failed
+    error_message = "Failed to fetch chat sessions after multiple attempts. Please check server logs for details."
+    print(error_message)
     try:
-        response = requests.get(join_api_url(API_BASE_URL, "/chat/sessions"))
-        response.raise_for_status()
-        return response.json()
-    except Exception as e:
-        st.error(f"Error fetching chat sessions: {str(e)}")
-        return []
+        st.error(error_message)
+    except:
+        # If we're not in a Streamlit context, ignore the UI error
+        pass
+    return []
 
 @st.cache_data(ttl=60)  # Cache for 1 minute
 def get_chat_session(session_id):
     """Get a chat session by ID."""
-    try:
-        # Ensure ID is properly formatted as UUID
-        formatted_id = format_uuid_if_needed(session_id)
-        if formatted_id != session_id:
-            print(f"Reformatted session ID from {session_id} to {formatted_id}")
-            
-        # Try with the formatted ID
-        url = join_api_url(API_BASE_URL, f"/chat/sessions/{formatted_id}")
-        print(f"Getting chat session from: {url}")
-        response = requests.get(url)
-        
-        # Log detailed response info for debugging
-        print(f"Response status: {response.status_code}, Content: {response.text[:100]}...")
-        
-        if response.status_code != 200:
-            # If it fails, try again with the original ID as fallback
-            backup_url = join_api_url(API_BASE_URL, f"/chat/sessions/{session_id}")
-            print(f"Trying fallback URL: {backup_url}")
-            backup_response = requests.get(backup_url)
-            if backup_response.status_code == 200:
-                print("Fallback request succeeded")
-                return backup_response.json()
-            else:
-                print(f"Fallback also failed: {backup_response.status_code}")
+    # Add retry logic for server errors
+    max_retries = 3
+    retry_delay = 1  # seconds
+    
+    for attempt in range(1, max_retries + 1):
+        try:
+            # Ensure ID is properly formatted as UUID
+            formatted_id = format_uuid_if_needed(session_id)
+            if formatted_id != session_id:
+                print(f"Reformatted session ID from {session_id} to {formatted_id}")
                 
-        response.raise_for_status()
-        return response.json()
-    except Exception as e:
-        st.error(f"Error fetching chat session: {str(e)}")
-        print(f"Exception in get_chat_session: {str(e)}")
-        return None
+            # Try with the formatted ID
+            url = join_api_url(API_BASE_URL, f"/chat/sessions/{formatted_id}")
+            print(f"Getting chat session from: {url} (attempt {attempt}/{max_retries})")
+            
+            response = requests.get(url, timeout=5)
+            
+            # Handle server errors with retries
+            if response.status_code == 500:
+                error_msg = f"Server error (attempt {attempt}/{max_retries}): {response.text[:200]}..."
+                print(error_msg)
+                
+                if attempt < max_retries:
+                    print(f"Retrying in {retry_delay} seconds...")
+                    time.sleep(retry_delay)
+                    # Increase the delay for next retry (exponential backoff)
+                    retry_delay *= 2
+                    continue
+            
+            # Log detailed response info for debugging
+            print(f"Response status: {response.status_code}, Content: {response.text[:100]}...")
+            
+            # Handle non-200 responses
+            if response.status_code != 200:
+                # Try fallback with original ID only if it's a 404 (maybe formatting is the issue)
+                if response.status_code == 404 and formatted_id != session_id:
+                    backup_url = join_api_url(API_BASE_URL, f"/chat/sessions/{session_id}")
+                    print(f"Got 404, trying fallback URL: {backup_url}")
+                    backup_response = requests.get(backup_url, timeout=5)
+                    
+                    if backup_response.status_code == 200:
+                        print("Fallback request succeeded")
+                        return backup_response.json()
+                    else:
+                        print(f"Fallback also failed: {backup_response.status_code}")
+                
+                # For other server errors, retry
+                if attempt < max_retries and response.status_code >= 500:
+                    print(f"Retrying in {retry_delay} seconds...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2
+                    continue
+                
+                # If we've exhausted retries or got a non-retryable error
+                error_message = f"Error fetching chat session: {response.status_code} {response.reason}"
+                if response.status_code == 500:
+                    error_message += " - The server encountered an internal error. This might be temporary or require backend maintenance."
+                elif response.status_code == 404:
+                    error_message += f" - Chat session with ID {session_id} not found."
+                elif response.status_code == 401 or response.status_code == 403:
+                    error_message += " - Authentication or authorization issue. Check your credentials."
+                
+                # Show error in the UI - safely
+                print(error_message)
+                try:
+                    st.error(error_message)
+                except:
+                    # If we're not in a Streamlit context, ignore the UI error
+                    pass
+                
+                # Return None to indicate failure
+                return None
+            
+            # Success path
+            response.raise_for_status()
+            return response.json()
+            
+        except requests.Timeout:
+            error_msg = f"Request timed out on attempt {attempt}/{max_retries}"
+            print(error_msg)
+            
+            if attempt < max_retries:
+                print(f"Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+                retry_delay *= 2
+            else:
+                error_message = "Error fetching chat session: Request timed out. The server might be under heavy load or unreachable."
+                print(error_message)
+                try:
+                    st.error(error_message)
+                except:
+                    # If we're not in a Streamlit context, ignore the UI error
+                    pass
+                return None
+                
+        except requests.ConnectionError:
+            error_msg = f"Connection error on attempt {attempt}/{max_retries}"
+            print(error_msg)
+            
+            if attempt < max_retries:
+                print(f"Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+                retry_delay *= 2
+            else:
+                error_message = "Error fetching chat session: Connection failed. Please check if the API server is running."
+                print(error_message)
+                try:
+                    st.error(error_message)
+                except:
+                    # If we're not in a Streamlit context, ignore the UI error
+                    pass
+                return None
+                
+        except Exception as e:
+            error_msg = f"Unexpected error on attempt {attempt}/{max_retries}: {str(e)}"
+            print(error_msg)
+            
+            if attempt < max_retries:
+                print(f"Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+                retry_delay *= 2
+            else:
+                error_message = f"Error fetching chat session: {str(e)}"
+                print(error_message)
+                try:
+                    st.error(error_message)
+                except:
+                    # If we're not in a Streamlit context, ignore the UI error
+                    pass
+                import traceback
+                print(traceback.format_exc())
+                return None
+    
+    # If we reach here, all retries failed
+    error_message = "Failed to fetch chat session after multiple attempts. Please check server logs for details."
+    print(error_message)
+    try:
+        st.error(error_message)
+    except:
+        # If we're not in a Streamlit context, ignore the UI error
+        pass
+    return None
 
 def create_chat_session(document_id=None, document_ids=None, name=None, chat_mode="completion", llm_provider=None, llm_model=None):
     """Create a new chat session."""
@@ -377,17 +625,114 @@ def send_message(session_id, message, context_window=5):
         print(traceback.format_exc())
         return None
 
-@st.cache_data(ttl=settings.DOCUMENT_CACHE_TTL)
+@st.cache_data(ttl=300)  # Cache for 5 minutes
 def get_documents():
-    """Get all documents from the API."""
+    """Get all documents from the API with retry logic for server errors."""
+    max_retries = 3
+    retry_delay = 1  # seconds
+    
+    for attempt in range(1, max_retries + 1):
+        try:
+            url = join_api_url(API_BASE_URL, "/documents")
+            print(f"Getting documents from: {url} (attempt {attempt}/{max_retries})")
+            
+            response = requests.get(url, timeout=10)
+            
+            # Handle different response status codes
+            if response.status_code != 200:
+                error_message = f"Error fetching documents: {response.status_code} {response.reason}"
+                
+                # More specific error messages based on status code
+                if response.status_code == 500:
+                    error_message += " - Server error. This might be temporary."
+                elif response.status_code == 401 or response.status_code == 403:
+                    error_message += " - Authentication or authorization issue."
+                
+                # For server errors, retry
+                if response.status_code >= 500 and attempt < max_retries:
+                    print(f"Server error on attempt {attempt}, retrying in {retry_delay} seconds...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2
+                    continue
+                
+                # If we've exhausted retries or got a non-retryable error
+                print(error_message)
+                try:
+                    st.error(error_message)
+                except:
+                    # If we're not in a Streamlit context, ignore the UI error
+                    pass
+                return []
+            
+            documents = response.json()
+            print(f"Successfully fetched {len(documents)} documents")
+            return documents
+            
+        except requests.Timeout:
+            error_msg = f"Request timed out on attempt {attempt}/{max_retries}"
+            print(error_msg)
+            
+            if attempt < max_retries:
+                print(f"Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+                retry_delay *= 2
+            else:
+                error_message = "Error fetching documents: Request timed out. The server might be under heavy load."
+                print(error_message)
+                try:
+                    st.error(error_message)
+                except:
+                    # If we're not in a Streamlit context, ignore the UI error
+                    pass
+                return []
+                
+        except requests.ConnectionError:
+            error_msg = f"Connection error on attempt {attempt}/{max_retries}"
+            print(error_msg)
+            
+            if attempt < max_retries:
+                print(f"Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+                retry_delay *= 2
+            else:
+                error_message = "Error fetching documents: Connection failed. Please check if the API server is running."
+                print(error_message)
+                try:
+                    st.error(error_message)
+                except:
+                    # If we're not in a Streamlit context, ignore the UI error
+                    pass
+                return []
+                
+        except Exception as e:
+            error_msg = f"Unexpected error on attempt {attempt}/{max_retries}: {str(e)}"
+            print(error_msg)
+            
+            if attempt < max_retries:
+                print(f"Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+                retry_delay *= 2
+            else:
+                error_message = f"Error fetching documents: {str(e)}"
+                print(error_message)
+                try:
+                    st.error(error_message)
+                except:
+                    # If we're not in a Streamlit context, ignore the UI error
+                    pass
+                import traceback
+                print(traceback.format_exc())
+                return []
+    
+    # If we reach here, all retries failed
+    error_message = "Failed to fetch documents after multiple attempts. Please check server logs for details."
+    print(error_message)
     try:
-        url = join_api_url(API_BASE_URL, "/documents")
-        response = requests.get(url, timeout=3)
-        response.raise_for_status()
-        return response.json()
-    except Exception as e:
-        print(f"Error fetching documents: {str(e)}")
-        return []
+        st.error(error_message)
+    except:
+        # If we're not in a Streamlit context, ignore the UI error
+        pass
+    return []
 
 @st.cache_data
 def visualize_response(query, response_text, metadata=None):
@@ -693,7 +1038,7 @@ def create_direct_chat_session(key_prefix=""):
     # Create a placeholder for success message
     status_placeholder = st.empty()
     
-    # Get available documents for selection
+    # Get available documents for selection - cache is already applied to get_documents()
     documents = get_documents()
     
     # Check if we have any documents
@@ -701,242 +1046,576 @@ def create_direct_chat_session(key_prefix=""):
         st.warning("No documents available. Please upload documents first.")
         return
     
-    # Session name
-    session_name = st.text_input(
-        "Session Name",
-        key=f"{key_prefix}_session_name",
-        placeholder="My Chat Session"
-    )
-    
-    # Document selection - multi-select if enabled
-    # Create safer document options that handle missing keys
-    doc_options = []
-    
-    # Debug the document structure for diagnosis
-    print("DEBUG: Document structure check:")
-    for i, doc in enumerate(documents):
-        doc_str = str({k: v for k, v in doc.items() if k in ['id', 'name', 'title', 'filename', 'pages', 'file_size']})
-        print(f"Document {i}: {doc_str}")
-    
-    for doc in documents:
-        doc_id = doc.get("id", "unknown_id")
-        
-        # Extract title from metadata if available
-        metadata = doc.get("metadata", {})
-        doc_title = metadata.get("title") if metadata else None
-        
-        # If no title in metadata, try other possible locations or keys
-        if not doc_title:
-            doc_title = doc.get("title", "")  # Try direct title property
-            
-        # If still no title, use original_filename or filename
-        if not doc_title:
-            doc_title = doc.get("original_filename", "")
-        if not doc_title:
-            doc_title = doc.get("filename", "").split('/')[-1] if doc.get("filename") else "Untitled Document"
-        
-        # Display document info with size or page count
-        page_count = None
-        if "page_count" in metadata:
-            page_count = metadata.get("page_count")
-        elif "pages" in doc:
-            page_count = doc.get("pages")
-            
-        if page_count:
-            doc_info = f"{doc_title} ({page_count} pages)"
-        elif "file_size" in doc:
-            # Convert bytes to KB/MB if available
-            size_bytes = doc["file_size"]
-            if size_bytes < 1024:
-                size_str = f"{size_bytes} bytes"
-            elif size_bytes < 1024 * 1024:
-                size_str = f"{size_bytes / 1024:.1f} KB"
-            else:
-                size_str = f"{size_bytes / (1024 * 1024):.1f} MB"
-            doc_info = f"{doc_title} ({size_str})"
-        else:
-            doc_info = doc_title
-        
-        doc_options.append((doc_id, doc_info))
-    
-    # Print document structure for debugging
-    print(f"Document structure sample (first doc): {documents[0] if documents else 'No documents'}")
-    
-    if settings.ENABLE_MULTI_DOCUMENT_CHAT:
-        selected_docs = st.multiselect(
-            "Select Documents",
-            options=[doc[0] for doc in doc_options],
-            format_func=lambda x: next((doc[1] for doc in doc_options if doc[0] == x), x),
-            key=f"{key_prefix}_multi_docs"
+    # Use form for better performance (reduces reruns)
+    with st.form(key=f"{key_prefix}_new_chat_form"):
+        # Session name
+        session_name = st.text_input(
+            "Session Name",
+            key=f"{key_prefix}_session_name",
+            placeholder="My Chat Session"
         )
-    else:
-        selected_doc = st.selectbox(
-            "Select Document",
-            options=[""] + [doc[0] for doc in doc_options],
-            format_func=lambda x: next((doc[1] for doc in doc_options if doc[0] == x), x if x else "None"),
-            key=f"{key_prefix}_single_doc"
-        )
-        selected_docs = [selected_doc] if selected_doc else []
-    
-    # Model selection
-    provider_col, model_col = st.columns(2)
-    
-    with provider_col:
-        provider_options = [(key, info["display_name"]) for key, info in LLM_PROVIDERS.items()]
-        selected_provider = st.selectbox(
-            "LLM Provider",
-            options=[p[0] for p in provider_options],
-            format_func=lambda x: next((p[1] for p in provider_options if p[0] == x), x),
-            index=[i for i, p in enumerate(provider_options) if p[0] == settings.DEFAULT_LLM_PROVIDER][0] if settings.DEFAULT_LLM_PROVIDER else 0,
-            key=f"{key_prefix}_provider"
-        )
-    
-    with model_col:
-        # Get models for selected provider
-        available_models = LLM_PROVIDERS[selected_provider]["models"] if selected_provider in LLM_PROVIDERS else []
-        default_model = settings.DEFAULT_LLM_MODEL if settings.DEFAULT_LLM_MODEL in available_models else (available_models[0] if available_models else "")
         
-        selected_model = st.selectbox(
-            "LLM Model",
-            options=available_models,
-            index=available_models.index(default_model) if default_model in available_models else 0,
-            key=f"{key_prefix}_model"
-        )
-    
-    # Chat mode
-    chat_mode = st.selectbox(
-        "Chat Mode",
-        options=["completion", "assistant"],
-        index=0 if settings.CHAT_MODE == "completion" else 1,
-        key=f"{key_prefix}_chat_mode"
-    )
-    
-    # Create session button
-    if st.button("Create Chat Session", key=f"{key_prefix}_create_btn", use_container_width=True):
-        if not selected_docs:
-            st.warning("Please select at least one document.")
-            return
+        # Document selection - multi-select if enabled
+        # Create safer document options that handle missing keys
+        doc_options = []
         
-        if not session_name:
-            # Generate a name based on the document title
-            if len(selected_docs) == 1:
-                doc_info = next((doc for doc in documents if doc["id"] == selected_docs[0]), None)
-                print(f"DEBUG: Selected document for naming: {selected_docs[0]}")
-                if doc_info:
-                    print(f"DEBUG: Document structure for naming: {str({k: v for k, v in doc_info.items() if k in ['id', 'metadata', 'original_filename', 'filename', 'pages', 'file_size']})}")
+        # Process documents once and store results
+        if "document_options" not in st.session_state:
+            st.session_state.document_options = []
+        
+        # Only rebuild document options if needed
+        if not st.session_state.document_options or len(st.session_state.document_options) != len(documents):
+            doc_options = []
+            for doc in documents:
+                doc_id = doc.get("id", "unknown_id")
+                
+                # Extract title from metadata if available
+                metadata = doc.get("metadata", {})
+                doc_title = metadata.get("title") if metadata else None
+                
+                # If no title in metadata, try other possible locations or keys
+                if not doc_title:
+                    doc_title = doc.get("title", "")  # Try direct title property
                     
-                    # Extract title from metadata if available
-                    metadata = doc_info.get("metadata", {})
-                    doc_title = metadata.get("title") if metadata else None
+                # If still no title, use original_filename or filename
+                if not doc_title:
+                    doc_title = doc.get("original_filename", "")
+                if not doc_title:
+                    doc_title = doc.get("filename", "").split('/')[-1] if doc.get("filename") else "Untitled Document"
+                
+                # Display document info with size or page count
+                page_count = None
+                if "page_count" in metadata:
+                    page_count = metadata.get("page_count")
+                elif "pages" in doc:
+                    page_count = doc.get("pages")
                     
-                    # If no title in metadata, try other possible locations or keys
-                    if not doc_title:
-                        doc_title = doc_info.get("title", "")  # Try direct title property
-                        
-                    # If still no title, use original_filename or filename
-                    if not doc_title:
-                        doc_title = doc_info.get("original_filename", "")
-                    if not doc_title:
-                        doc_title = doc_info.get("filename", "").split('/')[-1] if doc_info.get("filename") else "Document"
-                    
-                    print(f"DEBUG: Using document title: {doc_title}")
-                    session_name = f"Chat with {doc_title}"
+                if page_count:
+                    doc_info = f"{doc_title} ({page_count} pages)"
+                elif "file_size" in doc:
+                    # Convert bytes to KB/MB if available
+                    size_bytes = doc["file_size"]
+                    if size_bytes < 1024:
+                        size_str = f"{size_bytes} bytes"
+                    elif size_bytes < 1024 * 1024:
+                        size_str = f"{size_bytes / 1024:.1f} KB"
+                    else:
+                        size_str = f"{size_bytes / (1024 * 1024):.1f} MB"
+                    doc_info = f"{doc_title} ({size_str})"
                 else:
-                    print(f"DEBUG: No matching document found for ID: {selected_docs[0]}")
-                    session_name = "New Chat Session"
-            else:
-                session_name = f"Multi-document Chat ({len(selected_docs)} docs)"
+                    doc_info = doc_title
+                
+                doc_options.append((doc_id, doc_info))
+                
+            # Store in session state to avoid reprocessing
+            st.session_state.document_options = doc_options
+        else:
+            doc_options = st.session_state.document_options
         
-        # Display creating message
-        status_placeholder.info("Creating chat session...")
+        if settings.ENABLE_MULTI_DOCUMENT_CHAT:
+            selected_docs = st.multiselect(
+                "Select Documents",
+                options=[doc[0] for doc in doc_options],
+                format_func=lambda x: next((doc[1] for doc in doc_options if doc[0] == x), x),
+                key=f"{key_prefix}_multi_docs"
+            )
+        else:
+            selected_doc = st.selectbox(
+                "Select Document",
+                options=[""] + [doc[0] for doc in doc_options],
+                format_func=lambda x: next((doc[1] for doc in doc_options if doc[0] == x), x if x else "None"),
+                key=f"{key_prefix}_single_doc"
+            )
+            selected_docs = [selected_doc] if selected_doc else []
         
-        # Create the session
-        result = create_chat_session(
-            document_ids=selected_docs,
-            name=session_name,
-            chat_mode=chat_mode,
-            llm_provider=selected_provider,
-            llm_model=selected_model
+        # Model selection
+        provider_col, model_col = st.columns(2)
+        
+        with provider_col:
+            provider_options = [(key, info["display_name"]) for key, info in LLM_PROVIDERS.items()]
+            selected_provider = st.selectbox(
+                "LLM Provider",
+                options=[p[0] for p in provider_options],
+                format_func=lambda x: next((p[1] for p in provider_options if p[0] == x), x),
+                index=[i for i, p in enumerate(provider_options) if p[0] == settings.DEFAULT_LLM_PROVIDER][0] if settings.DEFAULT_LLM_PROVIDER else 0,
+                key=f"{key_prefix}_provider"
+            )
+        
+        with model_col:
+            # Get models for selected provider
+            available_models = LLM_PROVIDERS[selected_provider]["models"] if selected_provider in LLM_PROVIDERS else []
+            default_model = settings.DEFAULT_LLM_MODEL if settings.DEFAULT_LLM_MODEL in available_models else (available_models[0] if available_models else "")
+            
+            selected_model = st.selectbox(
+                "LLM Model",
+                options=available_models,
+                index=available_models.index(default_model) if default_model in available_models else 0,
+                key=f"{key_prefix}_model"
+            )
+        
+        # Chat mode
+        chat_mode = st.selectbox(
+            "Chat Mode",
+            options=["completion", "assistant"],
+            index=0 if settings.CHAT_MODE == "completion" else 1,
+            key=f"{key_prefix}_chat_mode"
         )
         
-        if result:
-            # Show success
-            status_placeholder.success("Chat session created successfully!")
+        # Create session button
+        submitted = st.form_submit_button("Create Chat Session", use_container_width=True)
+        
+        if submitted:
+            if not selected_docs:
+                status_placeholder.warning("Please select at least one document.")
+                return
             
-            # Set session as current and hide the form
-            st.session_state.current_session_id = result["id"]
-            st.session_state.newly_created_session = True
-            st.session_state.show_new_chat_form = False
+            session_name_to_use = session_name
             
-            # Clear any existing cache for this session
+            if not session_name_to_use:
+                # Generate a name based on the document title
+                if len(selected_docs) == 1:
+                    doc_info = next((doc for doc in documents if doc["id"] == selected_docs[0]), None)
+                    if doc_info:
+                        # Extract title from metadata if available
+                        metadata = doc_info.get("metadata", {})
+                        doc_title = metadata.get("title") if metadata else None
+                        
+                        # If no title in metadata, try other possible locations or keys
+                        if not doc_title:
+                            doc_title = doc_info.get("title", "")  # Try direct title property
+                            
+                        # If still no title, use original_filename or filename
+                        if not doc_title:
+                            doc_title = doc_info.get("original_filename", "")
+                        if not doc_title:
+                            doc_title = doc_info.get("filename", "").split('/')[-1] if doc_info.get("filename") else "Document"
+                        
+                        session_name_to_use = f"Chat with {doc_title}"
+                    else:
+                        session_name_to_use = "New Chat Session"
+                else:
+                    session_name_to_use = f"Multi-document Chat ({len(selected_docs)} docs)"
+            
+            # Display creating message
+            status_placeholder.info("Creating chat session...")
+            
+            # Create the session
+            result = create_chat_session(
+                document_ids=selected_docs,
+                name=session_name_to_use,
+                chat_mode=chat_mode,
+                llm_provider=selected_provider,
+                llm_model=selected_model
+            )
+            
+            if result:
+                # Show success
+                status_placeholder.success("Chat session created successfully! You can start chatting now.")
+                
+                # Set session as current and hide the form
+                st.session_state.current_session_id = result["id"]
+                st.session_state.newly_created_session = True
+                st.session_state.show_new_chat_form = False
+                
+                # Clear any existing cache for this session
+                if "current_session_cache" in st.session_state:
+                    del st.session_state.current_session_cache
+                
+                # Force a rerun to show the chat immediately
+                st.rerun()
+            else:
+                status_placeholder.error("Failed to create chat session. Please try again.")
+
+@st.cache_data(ttl=60)  # Cache for 1 minute
+def check_api_health(base_url):
+    """Check if the API is healthy - cached to avoid unnecessary requests."""
+    try:
+        # Get the base URL without the /api path for health check
+        health_url = f"{base_url}/health"
+        api_check = requests.get(health_url, timeout=2)
+        return api_check.status_code == 200
+    except Exception:
+        return False
+
+def reset_all_chat_sessions():
+    """Reset all chat sessions - use with caution!"""
+    try:
+        url = join_api_url(API_BASE_URL, "/chat/sessions")
+        response = requests.delete(url, timeout=5)
+        
+        if response.status_code == 200:
+            # Clear caches
+            get_chat_sessions.clear()
             if "current_session_cache" in st.session_state:
                 del st.session_state.current_session_cache
+            if "chat_sessions" in st.session_state:
+                st.session_state.chat_sessions = []
+            st.session_state.current_session_id = None
             
-            # Force a rerun to show the chat immediately
-            st.rerun()
+            return True, "All chat sessions have been reset successfully."
         else:
-            status_placeholder.error("Failed to create chat session. Please try again.")
+            error_message = f"Failed to reset sessions. Server returned: {response.status_code} - {response.text}"
+            return False, error_message
+    except Exception as e:
+        error_message = f"Error resetting chat sessions: {str(e)}"
+        return False, error_message
 
 def chat_interface():
     """Streamlit interface for document chat - simplified approach."""
-    st.title("Chat with Your Documents")
+    # Create containers for different parts of the UI to optimize rendering
+    title_container = st.container()
+    api_status_container = st.empty()
+    error_recovery_container = st.empty()
+    main_content_container = st.container()
     
-    # API connection check
-    api_working = True
+    with title_container:
+        st.title("Chat with Your Documents")
+    
+    # API connection check - now using a cached function to improve performance
+    # Get the base URL without the /api path for health check
+    base_url = API_BASE_URL
+    if "/api" in base_url:
+        base_url = base_url.split("/api")[0]
+        
+    api_working = check_api_health(base_url)
+    
+    # Check for the known ChatService.get_sessions issue
+    known_backend_issue = False
     try:
-        # Get the base URL without the /api path for health check
-        base_url = API_BASE_URL
-        if "/api" in base_url:
-            base_url = base_url.split("/api")[0]
-        
-        health_url = f"{base_url}/health"
-        api_check = requests.get(health_url, timeout=2)
-        api_working = api_check.status_code == 200
-        
-        # Display connection status
-        if api_working:
+        # Try to fetch sessions but catch any errors
+        test_sessions_url = join_api_url(API_BASE_URL, "/chat/sessions")
+        test_response = requests.get(test_sessions_url, timeout=3)
+        if test_response.status_code == 500 and "AttributeError: 'ChatService' object has no attribute 'get_sessions'" in test_response.text:
+            known_backend_issue = True
+    except Exception:
+        # If we can't even connect, just continue with normal flow
+        pass
+    
+    # Check for the old session format issues
+    old_session_format_issue = False
+    try:
+        # Try to fetch sessions but catch any errors
+        test_sessions_url = join_api_url(API_BASE_URL, "/chat/sessions")
+        test_response = requests.get(test_sessions_url, timeout=3)
+        if test_response.status_code == 500 and "AttributeError: 'ChatSession' object has no attribute 'llm_provider'" in test_response.text:
+            old_session_format_issue = True
+    except Exception:
+        # If we can't even connect, just continue with normal flow
+        pass
+    
+    # Display connection status in a placeholder to avoid full rerenders
+    with api_status_container:
+        if known_backend_issue:
+            st.error("❌ Backend Error: The chat service is missing the get_sessions method.")
+            
+            # Show detailed error information in the recovery container
+            with error_recovery_container:
+                st.warning("There is a known issue with the backend chat service implementation.")
+                
+                solution_tab, debug_tab = st.tabs(["Solution", "Debug Info"])
+                
+                with solution_tab:
+                    st.markdown("""
+                    ### Backend Code Issue Detected
+                    
+                    The error is happening because the ChatService class in the backend doesn't have a method called `get_sessions()` that's being called in `chat_routes.py` on line 62.
+                    
+                    #### To fix this issue:
+                    
+                    1. Locate the ChatService class in your backend code
+                    2. Add the missing `get_sessions()` method that should return a list of chat sessions
+                    3. Restart the backend server
+                    
+                    #### Example implementation:
+                    ```python
+                    def get_sessions(self):
+                        # Return all chat sessions
+                        return self.get_all_sessions()
+                    ```
+                    
+                    Until this is fixed, you can still use the Create New Chat Session feature below,
+                    but you won't be able to see or select existing sessions.
+                    """)
+                    
+                    # Allow creating a new session despite the error
+                    st.info("You can still create a new chat session:")
+                    create_direct_chat_session(key_prefix="error_recovery")
+                
+                with debug_tab:
+                    st.markdown("### Error Details")
+                    st.code("""
+AttributeError: 'ChatService' object has no attribute 'get_sessions'
+File: C:\\poc\\app\\api\\chat_routes.py, Line 62
+Error in: get_chat_sessions function
+
+The API endpoint is trying to call:
+    sessions = chat_service.get_sessions()
+but this method doesn't exist in the ChatService class.
+                    """)
+                
+                # Don't proceed with the rest of the interface
+                return
+        elif old_session_format_issue:
+            st.error("❌ Backend Error: Incompatible session data format.")
+            
+            # Show detailed error information in the recovery container
+            with error_recovery_container:
+                st.warning("Your saved chat sessions use an older format that's incompatible with the current version.")
+                
+                solution_tab, debug_tab, reset_tab = st.tabs(["Solution", "Debug Info", "Reset Sessions"])
+                
+                with solution_tab:
+                    st.markdown("""
+                    ### Session Format Issue Detected
+                    
+                    The error is happening because your saved chat sessions are using an older format 
+                    that doesn't include the `llm_provider` and/or `llm_model` fields that are required in the current version.
+                    
+                    #### To fix this issue, you have two options:
+                    
+                    1. **Reset all chat sessions** (you'll lose your chat history)
+                    2. **Update the backend code** to safely handle older session formats
+                    
+                    The simplest solution is to reset all sessions using the tab "Reset Sessions".
+                    """)
+                
+                with debug_tab:
+                    st.markdown("### Error Details")
+                    st.code("""
+AttributeError: 'ChatSession' object has no attribute 'llm_provider'
+File: C:\\poc\\app\\services\\chat_service.py
+
+The error occurs when trying to access the llm_provider attribute 
+that doesn't exist in your older saved chat sessions.
+                    """)
+                
+                with reset_tab:
+                    st.warning("⚠️ Warning: Resetting all sessions will delete your chat history. This action cannot be undone.")
+                    st.markdown("If you're sure you want to proceed, click the button below:")
+                    
+                    if st.button("Reset All Chat Sessions", key="reset_sessions_button"):
+                        success, message = reset_all_chat_sessions()
+                        if success:
+                            st.success(message)
+                            st.info("Please refresh the page to continue.")
+                            # Show a button to refresh
+                            if st.button("Refresh Now", key="refresh_after_reset"):
+                                st.rerun()
+                        else:
+                            st.error(message)
+                
+                # Don't proceed with the rest of the interface
+                return
+        elif api_working:
             st.success("✅ Connected to API backend")
         else:
             st.error("❌ API health check failed - backend is not responding")
             
-    except Exception as e:
-        st.error(f"❌ API connection error: {str(e)}")
-        api_working = False
+            # Show detailed error recovery options in a separate container
+            with error_recovery_container:
+                st.warning("The application is experiencing connectivity issues with the backend server.")
+                
+                # Add tabs for different recovery options
+                troubleshoot_tab, debug_tab, api_test_tab = st.tabs(["Troubleshooting", "Debug Info", "API Tests"])
+                
+                with troubleshoot_tab:
+                    st.markdown("""
+                    ### Troubleshooting Steps:
+                    
+                    1. **Check if the backend server is running**
+                       - Verify that the server process is active
+                       - Look for any error messages in the server console
+                    
+                    2. **Verify API connectivity**
+                       - The app is trying to connect to: `{}`
+                       - Make sure this URL is correct in your `.env` file
+                    
+                    3. **Restart the application**
+                       - Try stopping and restarting both the frontend and backend
+                    
+                    4. **Clear browser cache**
+                       - Clear your browser cache and refresh the page
+                    """.format(API_BASE_URL))
+                    
+                    if st.button("Retry Connection", key="retry_connection"):
+                        # Clear the cache and force a refresh
+                        check_api_health.clear()
+                        get_chat_sessions.clear()
+                        st.rerun()
+                
+                with debug_tab:
+                    st.markdown("### Debug Information")
+                    st.code(f"""
+API Base URL: {API_BASE_URL}
+Health Check URL: {base_url}/health
+Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+                    """)
+                    
+                    # Try to get more specific error details
+                    st.markdown("### Recent Error Details")
+                    try:
+                        error_response = requests.get(join_api_url(API_BASE_URL, "/chat/sessions"), timeout=2)
+                        st.code(f"""
+Status Code: {error_response.status_code}
+Response: 
+{error_response.text[:500]}{'...' if len(error_response.text) > 500 else ''}
+                        """)
+                    except Exception as e:
+                        st.code(f"Could not connect to API: {str(e)}")
+                
+                with api_test_tab:
+                    st.markdown("### API Endpoint Tests")
+                    st.info("Test specific API endpoints to identify which ones are failing.")
+                    
+                    # Create columns for different endpoint tests
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.markdown("#### Health Check")
+                        if st.button("Test Health Endpoint"):
+                            try:
+                                health_url = f"{base_url}/health"
+                                response = requests.get(health_url, timeout=3)
+                                if response.status_code == 200:
+                                    st.success(f"✅ Health check OK: {response.status_code}")
+                                    st.code(response.text[:500])
+                                else:
+                                    st.error(f"❌ Health check failed: {response.status_code}")
+                                    st.code(response.text[:500])
+                            except Exception as e:
+                                st.error(f"❌ Health check error: {str(e)}")
+                        
+                        st.markdown("#### Documents API")
+                        if st.button("Test Documents Endpoint"):
+                            try:
+                                doc_url = join_api_url(API_BASE_URL, "/documents")
+                                response = requests.get(doc_url, timeout=3)
+                                if response.status_code == 200:
+                                    st.success(f"✅ Documents API OK: {response.status_code}")
+                                    doc_count = len(response.json())
+                                    st.info(f"Found {doc_count} documents")
+                                else:
+                                    st.error(f"❌ Documents API failed: {response.status_code}")
+                                    st.code(response.text[:500])
+                            except Exception as e:
+                                st.error(f"❌ Documents API error: {str(e)}")
+                    
+                    with col2:
+                        st.markdown("#### Chat Sessions API")
+                        if st.button("Test Chat Sessions Endpoint"):
+                            try:
+                                sessions_url = join_api_url(API_BASE_URL, "/chat/sessions")
+                                response = requests.get(sessions_url, timeout=3)
+                                if response.status_code == 200:
+                                    st.success(f"✅ Chat Sessions API OK: {response.status_code}")
+                                    session_count = len(response.json())
+                                    st.info(f"Found {session_count} chat sessions")
+                                else:
+                                    st.error(f"❌ Chat Sessions API failed: {response.status_code}")
+                                    st.code(response.text[:500])
+                            except Exception as e:
+                                st.error(f"❌ Chat Sessions API error: {str(e)}")
+                        
+                        st.markdown("#### Backend Info")
+                        if st.button("Test Backend Info Endpoint"):
+                            try:
+                                # Try a different API endpoint that might work
+                                info_url = join_api_url(API_BASE_URL, "/info")
+                                response = requests.get(info_url, timeout=3)
+                                if response.status_code == 200:
+                                    st.success(f"✅ Backend Info API OK: {response.status_code}")
+                                    st.code(response.text[:500])
+                                else:
+                                    st.error(f"❌ Backend Info API failed: {response.status_code}")
+                                    st.code(response.text[:500])
+                            except Exception as e:
+                                st.error(f"❌ Backend Info API error: {str(e)}")
+                    
+                    # Option to test a custom API endpoint
+                    st.markdown("#### Custom API Test")
+                    with st.form("custom_api_test"):
+                        endpoint = st.text_input("API Endpoint (e.g., /status)", 
+                                               value="/status")
+                        full_url = join_api_url(API_BASE_URL, endpoint)
+                        st.text(f"Full URL: {full_url}")
+                        
+                        submitted = st.form_submit_button("Test Endpoint")
+                        if submitted:
+                            try:
+                                response = requests.get(full_url, timeout=3)
+                                if response.status_code == 200:
+                                    st.success(f"✅ API call successful: {response.status_code}")
+                                else:
+                                    st.error(f"❌ API call failed: {response.status_code}")
+                                
+                                st.code(f"Response: {response.text[:1000]}")
+                            except Exception as e:
+                                st.error(f"❌ API call error: {str(e)}")
+                
+                # Offer to continue in limited functionality mode
+                st.markdown("---")
+                st.markdown("### Continue in Limited Mode")
+                st.info("You can still view the application interface, but some features will be disabled.")
+                
+                if st.button("Continue in Limited Mode", key="limited_mode"):
+                    # Set a session state flag to indicate we're in limited mode
+                    st.session_state.limited_mode = True
+                    st.success("Entering limited functionality mode...")
+                    time.sleep(1)  # Short delay for UX purposes
+                
+                return
     
-    if not api_working:
-        st.error("⚠️ API is not connected. Chat functionality requires the backend API to be running.")
-        st.info(f"Please ensure the backend server is running at: {base_url}")
-        return
+    # Check if we're in limited mode
+    limited_mode = st.session_state.get("limited_mode", False)
     
-    # Initialize session state for chat
-    if "chat_sessions" not in st.session_state:
-        st.session_state.chat_sessions = get_chat_sessions()
+    with main_content_container:
+        # Initialize session state for chat
+        if "chat_sessions" not in st.session_state:
+            if api_working or limited_mode:
+                # In normal mode, fetch from API; in limited mode, use empty list
+                st.session_state.chat_sessions = get_chat_sessions() if api_working else []
+            
+        if "current_session_id" not in st.session_state:
+            # Set default session if available
+            if st.session_state.chat_sessions:
+                st.session_state.current_session_id = st.session_state.chat_sessions[0]["id"]
+            else:
+                st.session_state.current_session_id = None
         
-    if "current_session_id" not in st.session_state:
-        # Set default session if available
-        if st.session_state.chat_sessions:
-            st.session_state.current_session_id = st.session_state.chat_sessions[0]["id"]
-        else:
-            st.session_state.current_session_id = None
-    
-    # Call the chat page renderer directly
-    render_chat_page()
+        # If in limited mode, show a persistent indicator
+        if limited_mode:
+            st.warning("⚠️ Running in limited functionality mode. Some features are disabled.")
+            
+            # Provide option to exit limited mode
+            if st.button("Try to Reconnect", key="exit_limited_mode"):
+                st.session_state.limited_mode = False
+                check_api_health.clear()
+                st.rerun()
+        
+        # Call the chat page renderer directly
+        render_chat_page(limited_mode=limited_mode)
 
-def render_chat_page():
+def render_chat_page(limited_mode=False):
     """Render the chat interface page using a simplified approach similar to the example."""
+    # Create containers for different parts of the UI to optimize rendering
+    header_container = st.container()
+    newly_created_container = st.empty()
+    
     # Check if we have a newly created session
     newly_created = st.session_state.get("newly_created_session", False)
     
     # Clear the flag to prevent it from triggering again
     if newly_created:
         st.session_state.newly_created_session = False
-        st.success("Chat session created successfully! You can start chatting now.")
+        with newly_created_container:
+            st.success("Chat session created successfully! You can start chatting now.")
     
-    st.header("Chat with Your Documents")
+    with header_container:
+        st.header("Chat with Your Documents")
     
     # Cache the current session to avoid repeated API calls
     current_session = None
-    if st.session_state.current_session_id:
+    if st.session_state.current_session_id and not limited_mode:
         # Format the ID properly before comparison
         formatted_id = format_uuid_if_needed(st.session_state.current_session_id)
         
@@ -959,268 +1638,327 @@ def render_chat_page():
     
     # Left column: Session selection
     with chat_cols[0]:
-        st.subheader("Your Chat Sessions")
-        
-        # Add a refresh button for sessions
-        if st.button("🔄 Refresh Sessions", key="refresh_sessions", use_container_width=True):
-            st.session_state.chat_sessions = get_chat_sessions()
-            if "current_session_cache" in st.session_state:
-                del st.session_state.current_session_cache
-            st.success("Sessions refreshed!")
-        
-        # Add a button to create a new session
-        if st.button("➕ New Session", key="new_session_button", use_container_width=True):
-            st.session_state.show_new_chat_form = True
-        
-        # Show new chat form if requested
-        if st.session_state.get("show_new_chat_form", False):
-            with st.expander("Create New Session", expanded=True):
-                create_direct_chat_session(key_prefix="sidebar")
-                if st.button("Cancel", key="cancel_new_session"):
-                    st.session_state.show_new_chat_form = False
-        
-        # Session selection
-        if st.session_state.chat_sessions:
-            st.subheader("Select a Session")
+        sessions_container = st.container()
+        with sessions_container:
+            st.subheader("Your Chat Sessions")
             
-            # Add a search/filter box for sessions
-            session_filter = st.text_input("Filter sessions", key="session_filter", placeholder="Type to filter...")
-            
-            # Filter and limit displayed sessions
-            filtered_sessions = st.session_state.chat_sessions
-            if session_filter:
-                filtered_sessions = [s for s in st.session_state.chat_sessions 
-                                    if session_filter.lower() in s.get("name", "").lower()]
-            
-            # Only show first 10 sessions with a "show more" option if there are more
-            display_limit = 10
-            show_more = len(filtered_sessions) > display_limit
-            
-            if show_more and "session_show_all" not in st.session_state:
-                st.session_state.session_show_all = False
-            
-            if show_more and not st.session_state.get("session_show_all", False):
-                display_sessions = filtered_sessions[:display_limit]
-                st.info(f"Showing {display_limit} of {len(filtered_sessions)} sessions")
-                if st.button("Show all sessions"):
-                    st.session_state.session_show_all = True
+            if not limited_mode:
+                # Add a refresh button for sessions
+                if st.button("🔄 Refresh Sessions", key="refresh_sessions", use_container_width=True):
+                    st.session_state.chat_sessions = get_chat_sessions()
+                    if "current_session_cache" in st.session_state:
+                        del st.session_state.current_session_cache
+                
+                # Add a button to create a new session
+                if st.button("➕ New Session", key="new_session_button", use_container_width=True):
+                    st.session_state.show_new_chat_form = True
             else:
-                display_sessions = filtered_sessions
+                # In limited mode, these features are disabled
+                st.info("Session management is unavailable in limited mode.")
             
-            # Create a clean visual selection
-            for session in display_sessions:
-                # Create a clean display name with document info
-                display_name = session["name"]
-                doc_count = len(session.get("document_ids", [])) 
-                if not doc_count and session.get("document_id"):
-                    doc_count = 1
-                
-                # Use a cleaner button-like selection
-                session_id = session["id"]
-                is_selected = session_id == st.session_state.current_session_id
-                
-                # Create a highlighted button for the selected session
-                if is_selected:
-                    # Display the selected session with a delete button
-                    col1, col2 = st.columns([5, 1])
-                    with col1:
-                        st.markdown(f"""
-                        <div style="border:1px solid #4CAF50; border-radius:5px; padding:10px; margin:5px 0; background-color:rgba(76, 175, 80, 0.1);">
-                            <strong>{display_name}</strong><br>
-                            <small>{doc_count} document(s)</small>
-                        </div>
-                        """, unsafe_allow_html=True)
-                    with col2:
-                        # Delete button for current session
-                        if st.button("🗑️", key=f"delete_{session_id}", help="Delete this session"):
-                            if delete_chat_session(session_id):
-                                st.success("Session deleted successfully")
-                                # Refresh the session list
-                                st.session_state.chat_sessions = get_chat_sessions()
-                                # Select a new session if available
-                                if st.session_state.chat_sessions:
-                                    st.session_state.current_session_id = st.session_state.chat_sessions[0]["id"]
-                                else:
-                                    st.session_state.current_session_id = None
-                                if "current_session_cache" in st.session_state:
-                                    del st.session_state.current_session_cache
-                else:
-                    # Create a selectable session with a delete button
-                    col1, col2 = st.columns([5, 1])
-                    with col1:
-                        # Session selection button
-                        if st.button(
-                            f"{display_name} ({doc_count} docs)",
-                            key=f"select_{session_id}",
-                            use_container_width=True
-                        ):
-                            st.session_state.current_session_id = session_id
-                            if "current_session_cache" in st.session_state:
-                                del st.session_state.current_session_cache
-                    with col2:
-                        # Delete button for this session
-                        if st.button("🗑️", key=f"delete_{session_id}", help="Delete this session"):
-                            if delete_chat_session(session_id):
-                                st.success("Session deleted successfully")
-                                # Refresh the session list
-                                st.session_state.chat_sessions = get_chat_sessions()
-                                # If we deleted the currently selected session, select a new one
-                                if session_id == st.session_state.current_session_id:
-                                    if st.session_state.chat_sessions:
-                                        st.session_state.current_session_id = st.session_state.chat_sessions[0]["id"]
-                                    else:
-                                        st.session_state.current_session_id = None
-                                    if "current_session_cache" in st.session_state:
-                                        del st.session_state.current_session_cache
+            # Show new chat form if requested and not in limited mode
+            if st.session_state.get("show_new_chat_form", False) and not limited_mode:
+                with st.expander("Create New Session", expanded=True):
+                    create_direct_chat_session(key_prefix="sidebar")
+                    if st.button("Cancel", key="cancel_new_session"):
+                        st.session_state.show_new_chat_form = False
             
-            # Add a button to delete all sessions
-            if st.session_state.chat_sessions:
-                if st.button("🗑️ Delete All Sessions", key="delete_all_sessions"):
-                    # Create a confirmation dialog
-                    if "confirm_delete_all" not in st.session_state:
-                        st.session_state.confirm_delete_all = False
-                        
-                    st.session_state.confirm_delete_all = True
-                    st.warning("Are you sure you want to delete ALL chat sessions? This cannot be undone.")
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        if st.button("Yes, delete all", key="confirm_delete_yes"):
-                            # Delete all sessions
-                            success_count = 0
-                            for session in st.session_state.chat_sessions:
-                                if delete_chat_session(session["id"]):
-                                    success_count += 1
-                            
-                            # Update the UI
-                            st.session_state.chat_sessions = get_chat_sessions()
-                            st.session_state.current_session_id = None
-                            if "current_session_cache" in st.session_state:
-                                del st.session_state.current_session_cache
-                            st.session_state.confirm_delete_all = False
-                            
-                            if success_count > 0:
-                                st.success(f"Successfully deleted {success_count} chat sessions")
-                            else:
-                                st.error("Failed to delete sessions")
-                    with col2:
-                        if st.button("Cancel", key="confirm_delete_no"):
-                            st.session_state.confirm_delete_all = False
-            
-        else:
-            st.info("No chat sessions available. Create a new session to get started.")
-    
-    # Right column: Chat interface (simplified like the example)
-    with chat_cols[1]:
-        if st.session_state.current_session_id and current_session:
-            # Get session details
-            session_name = current_session.get('name', 'Unnamed Chat')
-            chat_mode = current_session.get('chat_mode', settings.CHAT_MODE)
-            document_ids = current_session.get('document_ids', [])
-            provider = current_session.get('llm_provider', settings.DEFAULT_LLM_PROVIDER)
-            model = current_session.get('llm_model', settings.DEFAULT_LLM_MODEL)
-            
-            if not document_ids and current_session.get('document_id'):
-                document_ids = [current_session['document_id']]
-                
-            # Display session header with model info
-            st.header(f"Chat: {session_name}")
-            
-            # Display basic chat info
-            info_cols = st.columns(3)
-            with info_cols[0]:
-                # Display LLM provider and model
-                provider_display = LLM_PROVIDERS.get(provider, {}).get("display_name", provider)
-                st.markdown(f"**Model:** {provider_display} - {model}")
-            with info_cols[1]:
-                st.markdown(f"**Documents:** {len(document_ids)}")
-            with info_cols[2]:
-                # Add a refresh button for just this session
-                if st.button("🔄 Refresh Chat", key="refresh_current_chat"):
-                    if "current_session_cache" in st.session_state:
-                        del st.session_state.current_session_cache
-            
-            # Only show connection status in special cases - removing DEBUG check
-            if settings.USE_WEBSOCKET_CHAT:
-                if "ws_connection" in st.session_state and st.session_state.ws_connection:
-                    st.success("⚡ Using real-time connection")
+            # Create a separate container for session lists to optimize rendering
+            session_list_container = st.container()
+            with session_list_container:
+                # Session selection
+                if st.session_state.chat_sessions:
+                    st.subheader("Select a Session")
                     
-            # Display messages using the chat message container for a better look
-            messages = current_session.get("messages", [])
-            
-            # Setup message containers
-            message_placeholder = st.container()
-            with message_placeholder:
-                # Display all messages
-                for message in messages:
-                    with st.chat_message(message["role"]):
-                        st.markdown(message["text"])
-            
-            # Chat input - use Streamlit's chat input for better UX
-            if user_input := st.chat_input("Type your message...", key="chat_input"):
-                # Add user message to the display immediately
-                with st.chat_message("user"):
-                    st.markdown(user_input)
-                
-                # Create a placeholder for any temporary messages
-                response_placeholder = st.empty()
-                
-                # Use a spinner while waiting for response
-                with st.spinner("AI is thinking..."):
-                    # Send message with WebSocket or fallback to REST API
-                    response = ws_send_message(
-                        st.session_state.current_session_id,
-                        user_input,
-                        context_window=5
-                    )
+                    # Add a search/filter box for sessions
+                    session_filter = st.text_input("Filter sessions", key="session_filter", placeholder="Type to filter...")
                     
-                    if response and response.get("success"):
-                        # Clear any temporary messages
-                        response_placeholder.empty()
-                        
-                        # Display the AI response
-                        with st.chat_message("assistant"):
-                            ai_message = response.get("message", {})
-                            response_text = ai_message.get("text", "")
-                            if response_text:
-                                st.markdown(response_text)
-                            else:
-                                st.warning("Received empty response from AI. Please try again.")
-                        
-                        # Update session state
-                        if "current_session_cache" in st.session_state:
-                            # Refresh the session cache
-                            current_session = get_chat_session(st.session_state.current_session_id)
-                            if current_session:
-                                st.session_state.current_session_cache = current_session
+                    # Filter and limit displayed sessions
+                    filtered_sessions = st.session_state.chat_sessions
+                    if session_filter:
+                        filtered_sessions = [s for s in st.session_state.chat_sessions 
+                                            if session_filter.lower() in s.get("name", "").lower()]
+                    
+                    # Only show first 10 sessions with a "show more" option if there are more
+                    display_limit = 10
+                    show_more = len(filtered_sessions) > display_limit
+                    
+                    if show_more and "session_show_all" not in st.session_state:
+                        st.session_state.session_show_all = False
+                    
+                    if show_more and not st.session_state.get("session_show_all", False):
+                        display_sessions = filtered_sessions[:display_limit]
+                        st.info(f"Showing {display_limit} of {len(filtered_sessions)} sessions")
+                        if st.button("Show all sessions"):
+                            st.session_state.session_show_all = True
                     else:
-                        # Show a friendly error and suggest retry
-                        response_placeholder.error("I couldn't process your message at this time. The system may be experiencing temporary issues.")
-                        response_placeholder.info("You can try again or check back later.")
-            
-        elif st.session_state.current_session_id and not current_session:
-            st.error("Error loading chat session. The session may have been deleted.")
-            
-            # Provide options to recover
-            st.info("Options to recover:")
-            recovery_col1, recovery_col2 = st.columns([1, 1])
-            
-            with recovery_col1:
-                if st.button("Try Again", key="try_again_btn"):
-                    if "current_session_cache" in st.session_state:
-                        del st.session_state.current_session_cache
-            
-            with recovery_col2:
-                if st.button("Start New Session", key="new_session_btn"):
-                    st.session_state.current_session_id = None
-                    if "current_session_cache" in st.session_state:
-                        del st.session_state.current_session_cache
-        else:
-            # No current session, show guidance
-            st.info("Select a chat session from the list on the left or create a new session to get started.")
-            
-            # Add a quick direct creation form
-            st.markdown("### Create New Chat Session")
-            create_direct_chat_session(key_prefix="main")
+                        display_sessions = filtered_sessions
+                    
+                    # Create a clean visual selection - use a placeholder for faster updates
+                    session_buttons_container = st.container()
+                    with session_buttons_container:
+                        for session in display_sessions:
+                            # Create a clean display name with document info
+                            display_name = session["name"]
+                            doc_count = len(session.get("document_ids", [])) 
+                            if not doc_count and session.get("document_id"):
+                                doc_count = 1
+                            
+                            # Use a cleaner button-like selection
+                            session_id = session["id"]
+                            is_selected = session_id == st.session_state.current_session_id
+                            
+                            # Create a highlighted button for the selected session
+                            if is_selected:
+                                # Display the selected session with a delete button
+                                col1, col2 = st.columns([5, 1])
+                                with col1:
+                                    st.markdown(f"""
+                                    <div style="border:1px solid #4CAF50; border-radius:5px; padding:10px; margin:5px 0; background-color:rgba(76, 175, 80, 0.1);">
+                                        <strong>{display_name}</strong><br>
+                                        <small>{doc_count} document(s)</small>
+                                    </div>
+                                    """, unsafe_allow_html=True)
+                                
+                                # Only show delete button if not in limited mode
+                                if not limited_mode:
+                                    with col2:
+                                        # Delete button for current session
+                                        if st.button("🗑️", key=f"delete_{session_id}", help="Delete this session"):
+                                            if delete_chat_session(session_id):
+                                                st.success("Session deleted successfully")
+                                                # Refresh the session list
+                                                st.session_state.chat_sessions = get_chat_sessions()
+                                                # Select a new session if available
+                                                if st.session_state.chat_sessions:
+                                                    st.session_state.current_session_id = st.session_state.chat_sessions[0]["id"]
+                                                else:
+                                                    st.session_state.current_session_id = None
+                                                if "current_session_cache" in st.session_state:
+                                                    del st.session_state.current_session_cache
+                            else:
+                                # Create a selectable session with a delete button
+                                col1, col2 = st.columns([5, 1])
+                                with col1:
+                                    # Session selection button
+                                    if st.button(
+                                        f"{display_name} ({doc_count} docs)",
+                                        key=f"select_{session_id}",
+                                        use_container_width=True
+                                    ):
+                                        st.session_state.current_session_id = session_id
+                                        if "current_session_cache" in st.session_state:
+                                            del st.session_state.current_session_cache
+                                
+                                # Only show delete button if not in limited mode
+                                if not limited_mode:
+                                    with col2:
+                                        # Delete button for this session
+                                        if st.button("🗑️", key=f"delete_{session_id}", help="Delete this session"):
+                                            if delete_chat_session(session_id):
+                                                st.success("Session deleted successfully")
+                                                # Refresh the session list
+                                                st.session_state.chat_sessions = get_chat_sessions()
+                                                # If we deleted the currently selected session, select a new one
+                                                if session_id == st.session_state.current_session_id:
+                                                    if st.session_state.chat_sessions:
+                                                        st.session_state.current_session_id = st.session_state.chat_sessions[0]["id"]
+                                                    else:
+                                                        st.session_state.current_session_id = None
+                                                    if "current_session_cache" in st.session_state:
+                                                        del st.session_state.current_session_cache
+                    
+                    # Add a button to delete all sessions
+                    if not limited_mode:
+                        delete_all_container = st.container()
+                        with delete_all_container:
+                            if st.session_state.chat_sessions:
+                                if st.button("🗑️ Delete All Sessions", key="delete_all_sessions"):
+                                    # Create a confirmation dialog
+                                    if "confirm_delete_all" not in st.session_state:
+                                        st.session_state.confirm_delete_all = False
+                                        
+                                    st.session_state.confirm_delete_all = True
+                                    st.warning("Are you sure you want to delete ALL chat sessions? This cannot be undone.")
+                                    col1, col2 = st.columns(2)
+                                    with col1:
+                                        if st.button("Yes, delete all", key="confirm_delete_yes"):
+                                            # Delete all sessions
+                                            success_count = 0
+                                            for session in st.session_state.chat_sessions:
+                                                if delete_chat_session(session["id"]):
+                                                    success_count += 1
+                                            
+                                            # Update the UI
+                                            st.session_state.chat_sessions = get_chat_sessions()
+                                            st.session_state.current_session_id = None
+                                            if "current_session_cache" in st.session_state:
+                                                del st.session_state.current_session_cache
+                                            st.session_state.confirm_delete_all = False
+                                            
+                                            if success_count > 0:
+                                                st.success(f"Successfully deleted {success_count} chat sessions")
+                                            else:
+                                                st.error("Failed to delete sessions")
+                                    with col2:
+                                        if st.button("Cancel", key="confirm_delete_no"):
+                                            st.session_state.confirm_delete_all = False
+                
+                elif limited_mode:
+                    st.info("Session list is unavailable in limited mode.")
+                else:
+                    st.info("No chat sessions available. Create a new session to get started.")
+    
+    # Right column: Chat interface
+    with chat_cols[1]:
+        chat_interface_container = st.container()
+        with chat_interface_container:
+            if limited_mode:
+                # Show a demo/fallback chat interface in limited mode
+                st.warning("Chat functionality is limited without backend connectivity.")
+                st.info("You can explore the interface, but messages won't be sent to the server.")
+                
+                # Display a mock chat interface
+                st.header("Chat: Demo Session")
+                
+                # Display basic mock info
+                info_cols = st.columns(3)
+                with info_cols[0]:
+                    st.markdown("**Model:** OpenAI - gpt-3.5-turbo")
+                with info_cols[1]:
+                    st.markdown("**Documents:** 1")
+                with info_cols[2]:
+                    if st.button("🔄 Refresh Chat", key="refresh_current_chat"):
+                        st.info("Refresh functionality is disabled in limited mode.")
+                
+                # Show some mock messages
+                with st.chat_message("user"):
+                    st.markdown("This is a sample user message.")
+                
+                with st.chat_message("assistant"):
+                    st.markdown("This is a sample AI response. The actual chat functionality requires connection to the backend server.")
+                
+                # Show mock input
+                user_input = st.chat_input("Type your message...", key="chat_input")
+                if user_input:
+                    with st.chat_message("user"):
+                        st.markdown(user_input)
+                    st.info("Message sending is disabled in limited mode. Please reconnect to the backend server.")
+                    
+            elif st.session_state.current_session_id and current_session:
+                # Regular chat interface when everything is working
+                # Get session details
+                session_name = current_session.get('name', 'Unnamed Chat')
+                chat_mode = current_session.get('chat_mode', settings.CHAT_MODE)
+                document_ids = current_session.get('document_ids', [])
+                provider = current_session.get('llm_provider', settings.DEFAULT_LLM_PROVIDER)
+                model = current_session.get('llm_model', settings.DEFAULT_LLM_MODEL)
+                
+                if not document_ids and current_session.get('document_id'):
+                    document_ids = [current_session['document_id']]
+                    
+                # Display session header with model info
+                st.header(f"Chat: {session_name}")
+                
+                # Display basic chat info
+                info_cols = st.columns(3)
+                with info_cols[0]:
+                    # Display LLM provider and model
+                    provider_display = LLM_PROVIDERS.get(provider, {}).get("display_name", provider)
+                    st.markdown(f"**Model:** {provider_display} - {model}")
+                with info_cols[1]:
+                    st.markdown(f"**Documents:** {len(document_ids)}")
+                with info_cols[2]:
+                    # Add a refresh button for just this session
+                    if st.button("🔄 Refresh Chat", key="refresh_current_chat"):
+                        if "current_session_cache" in st.session_state:
+                            del st.session_state.current_session_cache
+                
+                # Only show connection status in special cases
+                if settings.USE_WEBSOCKET_CHAT:
+                    if "ws_connection" in st.session_state and st.session_state.ws_connection:
+                        st.success("⚡ Using real-time connection")
+                
+                # Display messages using the chat message container for a better look
+                messages = current_session.get("messages", [])
+                
+                # Use a container for better message rendering performance
+                message_container = st.container()
+                with message_container:
+                    # Display all messages
+                    for message in messages:
+                        with st.chat_message(message["role"]):
+                            st.markdown(message["text"])
+                
+                # Chat input - use Streamlit's chat input for better UX
+                if user_input := st.chat_input("Type your message...", key="chat_input"):
+                    # Add user message to the display immediately
+                    with st.chat_message("user"):
+                        st.markdown(user_input)
+                    
+                    # Create a placeholder for any temporary messages
+                    response_placeholder = st.empty()
+                    
+                    # Use a spinner while waiting for response
+                    with st.spinner("AI is thinking..."):
+                        # Send message with WebSocket or fallback to REST API
+                        response = ws_send_message(
+                            st.session_state.current_session_id,
+                            user_input,
+                            context_window=5
+                        )
+                        
+                        if response and response.get("success"):
+                            # Clear any temporary messages
+                            response_placeholder.empty()
+                            
+                            # Display the AI response
+                            with st.chat_message("assistant"):
+                                ai_message = response.get("message", {})
+                                response_text = ai_message.get("text", "")
+                                if response_text:
+                                    st.markdown(response_text)
+                                else:
+                                    st.warning("Received empty response from AI. Please try again.")
+                            
+                            # Update session state
+                            if "current_session_cache" in st.session_state:
+                                # Refresh the session cache
+                                current_session = get_chat_session(st.session_state.current_session_id)
+                                if current_session:
+                                    st.session_state.current_session_cache = current_session
+                        else:
+                            # Show a friendly error and suggest retry
+                            response_placeholder.error("I couldn't process your message at this time. The system may be experiencing temporary issues.")
+                            response_placeholder.info("You can try again or check back later.")
+                
+            elif st.session_state.current_session_id and not current_session and not limited_mode:
+                st.error("Error loading chat session. The session may have been deleted.")
+                
+                # Provide options to recover
+                st.info("Options to recover:")
+                recovery_col1, recovery_col2 = st.columns([1, 1])
+                
+                with recovery_col1:
+                    if st.button("Try Again", key="try_again_btn"):
+                        if "current_session_cache" in st.session_state:
+                            del st.session_state.current_session_cache
+                
+                with recovery_col2:
+                    if st.button("Start New Session", key="new_session_btn"):
+                        st.session_state.current_session_id = None
+                        if "current_session_cache" in st.session_state:
+                            del st.session_state.current_session_cache
+            else:
+                # No current session, show guidance
+                st.info("Select a chat session from the list on the left or create a new session to get started.")
+                
+                # Add a quick direct creation form if not in limited mode
+                if not limited_mode:
+                    st.markdown("### Create New Chat Session")
+                    create_direct_chat_session(key_prefix="main")
+                else:
+                    st.info("Creating new sessions is unavailable in limited mode.")
 
 
 if __name__ == "__main__":

@@ -95,6 +95,17 @@ async def delete_chat_session(session_id: str = Path(..., description="The ID of
     return {"success": True, "message": f"Chat session with ID {session_id} deleted"}
 
 
+@router.delete("/sessions", response_model=Dict[str, Any])
+async def reset_all_chat_sessions():
+    """Reset all chat sessions. Use with caution!
+    This is primarily for recovery from corrupted session data."""
+    success = chat_service.clear_all_sessions()
+    if success:
+        return {"success": True, "message": "All chat sessions have been reset"}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to reset chat sessions")
+
+
 @router.post("/sessions/{session_id}/documents", response_model=ChatSessionModel)
 async def add_document_to_session(
     session_id: str = Path(..., description="The ID of the chat session"),

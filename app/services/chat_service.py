@@ -259,7 +259,7 @@ class ChatSession:
         self.updated_at = updated_at or datetime.now()
         self.chat_mode = chat_mode or settings.CHAT_MODE
         
-        # New attributes for flexible LLM selection
+        # New attributes for flexible LLM selection with backward compatibility
         self.llm_provider = llm_provider or settings.DEFAULT_LLM_PROVIDER
         self.llm_model = llm_model or settings.DEFAULT_LLM_MODEL
     
@@ -305,8 +305,8 @@ class ChatSession:
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
             "chat_mode": self.chat_mode,
-            "llm_provider": self.llm_provider,  # New field
-            "llm_model": self.llm_model  # New field
+            "llm_provider": getattr(self, "llm_provider", settings.DEFAULT_LLM_PROVIDER),  # Safe access for backward compatibility
+            "llm_model": getattr(self, "llm_model", settings.DEFAULT_LLM_MODEL)  # Safe access for backward compatibility
         }
     
     @classmethod
@@ -364,12 +364,43 @@ class ChatService:
                     if isinstance(loaded_sessions, dict):
                         self.sessions = loaded_sessions
                         logger.info(f"Loaded {len(self.sessions)} chat sessions from {CHAT_SESSIONS_PATH}")
+                        # Migrate sessions to ensure they have all required attributes
+                        self._migrate_sessions()
                     else:
                         logger.error(f"Invalid chat sessions format in {CHAT_SESSIONS_PATH}")
         except Exception as e:
             logger.error(f"Error loading chat sessions: {str(e)}")
             # Ensure the directory exists
             os.makedirs(os.path.dirname(CHAT_SESSIONS_PATH), exist_ok=True)
+    
+    def _migrate_sessions(self):
+        """Migrate existing sessions to ensure they have all required attributes."""
+        try:
+            for session_id, session in self.sessions.items():
+                # Add any missing attributes from newer versions
+                if not hasattr(session, 'llm_provider') or session.llm_provider is None:
+                    session.llm_provider = settings.DEFAULT_LLM_PROVIDER
+                    logger.info(f"Added missing llm_provider to session {session_id}")
+                
+                if not hasattr(session, 'llm_model') or session.llm_model is None:
+                    session.llm_model = settings.DEFAULT_LLM_MODEL
+                    logger.info(f"Added missing llm_model to session {session_id}")
+                
+                # Ensure document_ids exists and is populated from document_id if needed
+                if not hasattr(session, 'document_ids') or session.document_ids is None:
+                    session.document_ids = []
+                    logger.info(f"Added missing document_ids to session {session_id}")
+                
+                # If document_id exists but document_ids is empty, populate it
+                if session.document_id and not session.document_ids:
+                    session.document_ids = [session.document_id]
+                    logger.info(f"Populated document_ids from document_id in session {session_id}")
+                
+            # Save the migrated sessions
+            self._save_sessions()
+            logger.info(f"Successfully migrated {len(self.sessions)} sessions")
+        except Exception as e:
+            logger.error(f"Error migrating sessions: {str(e)}")
     
     def _save_sessions(self):
         """Save chat sessions to disk."""
@@ -444,6 +475,22 @@ class ChatService:
     def get_all_sessions(self) -> List[ChatSession]:
         """Get all chat sessions."""
         return list(self.sessions.values())
+    
+    def get_sessions(self) -> List[ChatSession]:
+        """Get all chat sessions - alias for get_all_sessions."""
+        return self.get_all_sessions()
+    
+    def clear_all_sessions(self) -> bool:
+        """Clear all chat sessions and save the empty state.
+        This is useful for recovering from corrupted sessions."""
+        try:
+            self.sessions = {}
+            self._save_sessions()
+            logger.info("Cleared all chat sessions")
+            return True
+        except Exception as e:
+            logger.error(f"Error clearing chat sessions: {str(e)}")
+            return False
     
     def delete_session(self, session_id: str) -> bool:
         """Delete a chat session."""
