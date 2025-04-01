@@ -1,84 +1,177 @@
-# Document Processing Service
+# Document Chat
 
-A scalable, efficient, and future-proof service for real-time document ingestion, processing, and analysis. This service supports multiple document formats, performs semantic parsing, metadata extraction, and generates vector embeddings using ChromaDB.
+A modern web application that allows users to chat with their documents using various LLM providers.
 
 ## Features
 
-- **Multi-format Document Support**: Processes PDF, DOCX, TXT, and CSV formats
-- **Semantic Parsing & Metadata Extraction**: Extracts meaningful context and metadata
-- **Intelligent Text Chunking**: Divides text into logical chunks while maintaining context
-- **Vector Embedding Generation**: Integrates with ChromaDB for high-quality embeddings
-- **OCR Integration**: Processes scanned documents and image-based PDFs
-- **Table Detection and Extraction**: Identifies and processes tables within documents
-- **PDF Section Highlighting**: Highlights sections from which responses are inferred
-- **Real-time UI**: Monitors processing status through a Streamlit interface
-- **Agentic Capability Ready**: Modular architecture supports future agentic features
-
-## Architecture
-
-The service is built using:
-- **FastAPI**: For a high-performance backend with async support
-- **Streamlit**: For a responsive and user-friendly frontend
-- **ChromaDB**: For vector embedding generation and storage
-- **PyTesseract**: For OCR capabilities
-- **PyPDF2 & pdfplumber**: For PDF processing
+- 📚 Multiple document support
+- 🤖 Multiple LLM providers (OpenAI, Google Gemini, Anthropic Claude)
+- 💬 Context-aware responses
+- 📊 Smart response visualization
+- 🔄 Session management
+- ⚡ Real-time updates
+- 🎨 Modern UI with Streamlit
 
 ## Installation
 
 1. Clone the repository:
-```
-git clone https://github.com/yourusername/document-processing-service.git
-cd document-processing-service
+
+```bash
+git clone https://github.com/yourusername/document-chat.git
+cd document-chat
 ```
 
-2. Install dependencies:
+2. Create a virtual environment and activate it:
+
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
 ```
+
+3. Install dependencies:
+
+```bash
 pip install -r requirements.txt
 ```
 
-3. For OCR functionality, install Tesseract:
-   - Windows: Download from https://github.com/UB-Mannheim/tesseract/wiki
-   - Linux: `sudo apt install tesseract-ocr`
-   - Mac: `brew install tesseract`
+4. Set up environment variables:
 
-## Configuration
-
-Edit the configuration files in the `app/config` directory to customize:
-- Text chunk size
-- Embedding model selection
-- Table extraction behavior
-- PDF highlighting parameters
-- OCR settings
+```bash
+cp .env.example .env
+# Edit .env with your configuration
+```
 
 ## Usage
 
-1. Start the backend service:
-```
-uvicorn app.main:app --reload
+1. Start the backend API server:
+
+```bash
+python -m uvicorn app.backend.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 2. Start the Streamlit frontend:
+
+```bash
+python -m streamlit run app/frontend/main.py
 ```
-streamlit run app/frontend/main.py
+
+3. Open your browser and navigate to `http://localhost:8501`
+
+## Configuration
+
+The application can be configured using environment variables or by editing the `.env` file:
+
+```env
+# API Configuration
+API_BASE_URL=http://localhost:8000/api
+API_TIMEOUT=30
+API_MAX_RETRIES=3
+API_RETRY_DELAY=1.0
+
+# Cache Configuration
+CACHE_TTL=300
+CACHE_MAX_ENTRIES=1000
+
+# Session Configuration
+SESSION_TIMEOUT=3600
+MAX_SESSIONS_PER_USER=10
+MAX_MESSAGES_PER_SESSION=100
+
+# Document Configuration
+MAX_DOCUMENT_SIZE=10485760  # 10MB
+MAX_DOCUMENTS_PER_SESSION=5
+
+# LLM Configuration
+DEFAULT_LLM_PROVIDER=openai
+DEFAULT_LLM_MODEL=gpt-4
+
+# Provider API Keys
+OPENAI_API_KEY=your_openai_api_key
+GOOGLE_API_KEY=your_google_api_key
+ANTHROPIC_API_KEY=your_anthropic_api_key
 ```
 
-3. Access the UI at http://localhost:8501
-4. Access the API documentation at http://localhost:8000/docs
+## Project Structure
 
-## API Endpoints
-
-- `POST /api/documents/upload`: Upload a new document for processing
-- `GET /api/documents/{document_id}`: Get document processing status
-- `GET /api/documents/{document_id}/content`: Get processed content
-- `GET /api/documents/{document_id}/embeddings`: Get vector embeddings
+```
+document-chat/
+├── app/
+│   ├── backend/         # FastAPI backend
+│   │   ├── api/        # API endpoints
+│   │   ├── core/       # Core functionality
+│   │   ├── models/     # Data models
+│   │   └── services/   # Business logic
+│   └── frontend/       # Streamlit frontend
+│       ├── components/ # UI components
+│       ├── api.py      # API client
+│       ├── config.py   # Configuration
+│       ├── forms.py    # Form components
+│       ├── main.py     # Main application
+│       └── utils.py    # Utilities
+├── tests/              # Test suite
+├── docs/               # Documentation
+├── .env.example        # Example environment variables
+├── requirements.txt    # Python dependencies
+└── README.md          # This file
+```
 
 ## Development
 
-Run tests:
+### Code Style
+
+We use the following tools to maintain code quality:
+
+- `black` for code formatting
+- `isort` for import sorting
+- `flake8` for linting
+- `mypy` for type checking
+
+Run the following commands before committing:
+
+```bash
+black .
+isort .
+flake8
+mypy .
 ```
+
+### Testing
+
+Run tests with pytest:
+
+```bash
 pytest
 ```
 
+Generate coverage report:
+
+```bash
+pytest --cov=app tests/
+```
+
+## Documentation
+
+Generate documentation using MkDocs:
+
+```bash
+mkdocs serve  # Development server
+mkdocs build  # Build static site
+```
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
+
 ## License
 
-MIT 
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Acknowledgments
+
+- [Streamlit](https://streamlit.io/) for the amazing web framework
+- [FastAPI](https://fastapi.tiangolo.com/) for the backend framework
+- All the LLM providers for their powerful APIs

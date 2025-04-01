@@ -21,8 +21,8 @@ class Settings(BaseSettings):
     PROCESSED_DIR: str = os.getenv("PROCESSED_DIR", "./processed")
     
     # Text Chunking Settings
-    DEFAULT_CHUNK_SIZE: int = int(os.getenv("DEFAULT_CHUNK_SIZE", "1000"))
-    DEFAULT_CHUNK_OVERLAP: int = int(os.getenv("DEFAULT_CHUNK_OVERLAP", "200"))
+    DEFAULT_CHUNK_SIZE: int = int(os.getenv("DEFAULT_CHUNK_SIZE", "500"))
+    DEFAULT_CHUNK_OVERLAP: int = int(os.getenv("DEFAULT_CHUNK_OVERLAP", "100"))
     
     # PDF Specific Settings
     PDF_HIGHLIGHT_COLOR: str = os.getenv("PDF_HIGHLIGHT_COLOR", "yellow")
