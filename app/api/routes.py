@@ -6,22 +6,31 @@ from pathlib import Path
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import (APIRouter, BackgroundTasks, Body, Depends, File, Form,
-                     HTTPException)
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, Form, HTTPException
 from fastapi import Path as PathParam
 from fastapi import Query, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 
 from app.config.settings import settings
-from app.models.document import (DocumentModel, DocumentResponse,
-                                 DocumentStatus, DocumentUploadRequest,
-                                 DocumentUploadResponse, ProcessingStep,
-                                 StepStatus, TableInfo, TextChunk)
+from app.models.document import (
+    DocumentModel,
+    DocumentResponse,
+    DocumentStatus,
+    DocumentUploadRequest,
+    DocumentUploadResponse,
+    ProcessingStep,
+    StepStatus,
+    TableInfo,
+    TextChunk,
+)
 from app.services.document_processor import calculate_processing_progress
-from app.services.document_processor import \
-    delete_document as delete_doc_from_store
-from app.services.document_processor import (get_document, list_documents,
-                                             process_document, save_document)
+from app.services.document_processor import delete_document as delete_doc_from_store
+from app.services.document_processor import (
+    get_document,
+    list_documents,
+    process_document,
+    save_document,
+)
 from app.services.embedding import get_collection_info, query_embeddings
 
 router = APIRouter(prefix=settings.API_V1_STR)
@@ -559,7 +568,7 @@ async def delete_document(document_id: UUID = PathParam(..., description="The ID
             os.remove(document.filename)
             
         # Remove document from store
-        delete_doc_from_store(document_id)
+        await delete_doc_from_store(document_id)
         
         return JSONResponse(
             status_code=200,

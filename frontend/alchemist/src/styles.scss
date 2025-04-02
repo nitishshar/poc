@@ -1,4 +1,352 @@
 /* You can add global styles to this file, and also import other style files */
+@use "@angular/material" as mat;
 
-html, body { height: 100%; }
-body { margin: 0; font-family: Roboto, "Helvetica Neue", sans-serif; }
+/* Import Google Fonts for Material Design */
+@import url("https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500&display=swap");
+@import url("https://fonts.googleapis.com/icon?family=Material+Icons");
+
+/* Import AG Grid styles - using legacy theme approach */
+@import "ag-grid-community/styles/ag-grid.css"; /* Used with theme="legacy" in grid components */
+@import "ag-grid-community/styles/ag-theme-alpine.css";
+
+// Base styles and variables that apply to all themes
+:root {
+  --border-radius: 8px;
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+  --font-family: Roboto, "Helvetica Neue", sans-serif;
+  --transition-speed: 0.3s;
+  --blur-amount: 10px;
+  --card-shadow: 0 4px 12px 0 rgba(0, 0, 0, 0.15);
+  --glass-border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+// Light theme variables
+.light-theme {
+  --primary-color: #2196f3;
+  --primary-lighter: #bbdefb;
+  --primary-darker: #1976d2;
+  --accent-color: #ff4081;
+  --warn-color: #f44336;
+  --text-color: rgba(0, 0, 0, 0.87);
+  --secondary-text-color: rgba(0, 0, 0, 0.6);
+  --disabled-text-color: rgba(0, 0, 0, 0.38);
+  --background-color: #fafafa;
+  --card-background: rgba(255, 255, 255, 0.8);
+  --background-lighter: rgba(255, 255, 255, 0.6);
+  --background-darker: rgba(240, 240, 240, 0.8);
+  --border-color: rgba(0, 0, 0, 0.12);
+  --divider-color: rgba(0, 0, 0, 0.12);
+  --shadow-color: rgba(0, 0, 0, 0.1);
+  --drop-area-border: rgba(0, 0, 0, 0.2);
+  --drop-area-hover: rgba(0, 0, 0, 0.05);
+  --success-color: #4caf50;
+  --error-color: #f44336;
+  --glass-background: rgba(255, 255, 255, 0.6);
+  --glass-card-background: rgba(255, 255, 255, 0.7);
+  --toolbar-background: rgba(255, 255, 255, 0.9);
+}
+
+// Dark theme variables
+.dark-theme {
+  --primary-color: #64b5f6;
+  --primary-lighter: #bbdefb;
+  --primary-darker: #1976d2;
+  --accent-color: #ff4081;
+  --warn-color: #f44336;
+  --text-color: rgba(255, 255, 255, 0.87);
+  --secondary-text-color: rgba(255, 255, 255, 0.7);
+  --disabled-text-color: rgba(255, 255, 255, 0.5);
+  --background-color: #121212;
+  --card-background: rgba(45, 45, 45, 0.6);
+  --background-lighter: rgba(66, 66, 66, 0.5);
+  --background-darker: rgba(30, 30, 30, 0.7);
+  --border-color: rgba(255, 255, 255, 0.12);
+  --divider-color: rgba(255, 255, 255, 0.12);
+  --shadow-color: rgba(0, 0, 0, 0.4);
+  --drop-area-border: rgba(255, 255, 255, 0.3);
+  --drop-area-hover: rgba(255, 255, 255, 0.05);
+  --success-color: #4caf50;
+  --error-color: #f44336;
+  --glass-background: rgba(30, 30, 30, 0.6);
+  --glass-card-background: rgba(45, 45, 45, 0.5);
+  --toolbar-background: rgba(18, 18, 18, 0.8);
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  font-family: var(--font-family);
+  background-color: var(--background-color);
+  color: var(--text-color);
+  transition: background-color var(--transition-speed) ease,
+    color var(--transition-speed) ease;
+}
+
+// Glass effect class
+.glass-effect {
+  background-color: var(--glass-background);
+  backdrop-filter: blur(var(--blur-amount));
+  -webkit-backdrop-filter: blur(var(--blur-amount));
+  border: var(--glass-border);
+  box-shadow: var(--card-shadow);
+}
+
+.card-glass {
+  background-color: var(--glass-card-background);
+  backdrop-filter: blur(var(--blur-amount));
+  -webkit-backdrop-filter: blur(var(--blur-amount));
+  border-radius: var(--border-radius);
+  border: var(--glass-border);
+  box-shadow: var(--card-shadow);
+  transition: all 0.3s ease;
+}
+
+.card-glass:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+}
+
+// Custom global styles
+.full-width {
+  width: 100%;
+}
+
+.full-height {
+  height: 100%;
+}
+
+.flex-container {
+  display: flex;
+}
+
+.flex-row {
+  display: flex;
+  flex-direction: row;
+}
+
+.flex-column {
+  display: flex;
+  flex-direction: column;
+}
+
+.justify-center {
+  justify-content: center;
+}
+
+.align-center {
+  align-items: center;
+}
+
+.mat-divider {
+  margin: 16px 0;
+}
+
+// Ensure scrollbars match the theme
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--background-lighter);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--primary-color);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--primary-darker);
+}
+
+/* Upload component styles */
+.upload-container {
+  background-color: var(--glass-background);
+  backdrop-filter: blur(var(--blur-amount));
+  -webkit-backdrop-filter: blur(var(--blur-amount));
+  border-radius: var(--border-radius);
+  border: var(--glass-border);
+  padding: var(--spacing-md);
+}
+
+.file-drop-area {
+  background-color: var(--background-darker);
+  border: 2px dashed var(--drop-area-border) !important;
+  border-radius: var(--border-radius);
+  transition: all var(--transition-speed) ease;
+}
+
+.file-drop-area:hover,
+.file-drop-area.drag-active {
+  background-color: var(--drop-area-hover);
+  border-color: var(--primary-color) !important;
+}
+
+/* Document card styles */
+.document-card {
+  background-color: var(--glass-card-background);
+  backdrop-filter: blur(var(--blur-amount));
+  -webkit-backdrop-filter: blur(var(--blur-amount));
+  border-radius: var(--border-radius);
+  border: var(--glass-border);
+  padding: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+  box-shadow: var(--card-shadow);
+  transition: all 0.3s ease;
+}
+
+.document-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+}
+
+/* Material components overrides */
+.mat-mdc-tab-group {
+  height: 100%;
+}
+
+.document-page-container .mat-mdc-tab-body-wrapper {
+  height: 100%;
+}
+
+/* Make sure scrollbars are styled properly */
+.mat-mdc-tab-body-content {
+  scrollbar-width: thin;
+  scrollbar-color: var(--primary-color) transparent;
+}
+
+.mat-mdc-tab-body-content::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.mat-mdc-tab-body-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.mat-mdc-tab-body-content::-webkit-scrollbar-thumb {
+  background-color: var(--primary-color);
+  border-radius: 10px;
+}
+
+/* Material button styling overrides */
+.mat-mdc-raised-button.mat-primary {
+  background-color: var(--primary-color);
+  color: white;
+}
+
+.mat-mdc-raised-button.mat-primary:disabled {
+  background-color: rgba(0, 0, 0, 0.12);
+  color: var(--disabled-text-color);
+}
+
+/* Success and error icons */
+.success-icon {
+  color: var(--success-color) !important;
+}
+
+.error-icon {
+  color: var(--error-color) !important;
+}
+
+/* Toolbar and sidenav styling */
+.mat-toolbar {
+  background-color: var(--toolbar-background) !important;
+  backdrop-filter: blur(var(--blur-amount));
+  -webkit-backdrop-filter: blur(var(--blur-amount));
+  border-bottom: var(--glass-border);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.mat-sidenav {
+  background-color: var(--glass-background) !important;
+  backdrop-filter: blur(var(--blur-amount));
+  -webkit-backdrop-filter: blur(var(--blur-amount));
+  border-right: var(--glass-border);
+}
+
+/* Material list item overrides */
+.mat-mdc-list-item {
+  color: var(--text-color) !important;
+}
+
+.mat-mdc-list-item:hover {
+  background-color: var(--background-lighter);
+}
+
+/* AG Grid height fixes */
+.ag-theme-alpine-dark {
+  height: 100%;
+  min-height: 400px;
+}
+
+/* Ensure router-outlet containers have height */
+router-outlet + * {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 400px;
+}
+
+/* Add flex behaviors to common content containers */
+.content-container {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 400px;
+}
+
+/* Material tab text color fixes */
+.dark-theme .mdc-tab__content {
+  color: rgba(255, 255, 255, 0.87) !important;
+}
+
+.light-theme .mdc-tab__content {
+  color: rgba(0, 0, 0, 0.87) !important;
+}
+
+/* Active tab color */
+.dark-theme .mdc-tab--active .mdc-tab__content {
+  color: var(--primary-color) !important;
+}
+
+.light-theme .mdc-tab--active .mdc-tab__content {
+  color: var(--primary-color) !important;
+}
+
+/* Additional Material tab text color overrides */
+.dark-theme .mat-mdc-tab-group .mdc-tab .mdc-tab__text-label {
+  color: rgba(255, 255, 255, 0.87) !important;
+}
+
+.light-theme .mat-mdc-tab-group .mdc-tab .mdc-tab__text-label {
+  color: rgba(0, 0, 0, 0.87) !important;
+}
+
+/* Target the inner spans too */
+.dark-theme .mdc-tab span {
+  color: rgba(255, 255, 255, 0.87) !important;
+}
+
+.light-theme .mdc-tab span {
+  color: rgba(0, 0, 0, 0.87) !important;
+}
+
+/* Make sure active tabs have higher specificity */
+.dark-theme .mat-mdc-tab-group .mdc-tab.mdc-tab--active .mdc-tab__text-label,
+.dark-theme .mdc-tab--active .mdc-tab__content,
+.dark-theme .mdc-tab--active span {
+  color: var(--primary-color) !important;
+}
+
+.light-theme .mat-mdc-tab-group .mdc-tab.mdc-tab--active .mdc-tab__text-label,
+.light-theme .mdc-tab--active .mdc-tab__content,
+.light-theme .mdc-tab--active span {
+  color: var(--primary-color) !important;
+}

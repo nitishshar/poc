@@ -1,0 +1,59 @@
+<div class="chat-list-container">
+  <div class="chat-list-header">
+    <h2>Chat Sessions</h2>
+    <button 
+      mat-raised-button 
+      color="primary" 
+      (click)="createNewSession()">
+      <mat-icon>add</mat-icon>
+      New Chat
+    </button>
+  </div>
+  
+  <div class="chat-list-content">
+    <app-loading-spinner 
+      *ngIf="isLoading" 
+      [diameter]="40" 
+      message="Loading chat sessions...">
+    </app-loading-spinner>
+    
+    <mat-card 
+      *ngIf="!(chatSessions$ | async)?.length && !isLoading" 
+      class="empty-state">
+      <mat-card-content>
+        <p>You don't have any chat sessions yet.</p>
+        <p>Create a new chat to get started!</p>
+      </mat-card-content>
+      <mat-card-actions align="end">
+        <button 
+          mat-raised-button 
+          color="primary" 
+          (click)="createNewSession()">
+          Start New Chat
+        </button>
+      </mat-card-actions>
+    </mat-card>
+    
+    <mat-nav-list class="session-list">
+      <mat-list-item 
+        *ngFor="let session of (chatSessions$ | async)" 
+        class="session-item"
+        (click)="session.id && openSession(session.id)">
+        <mat-icon matListItemIcon>chat</mat-icon>
+        <div matListItemTitle>{{ session.name || 'Unnamed Session' }}</div>
+        <div matListItemLine>
+          Created: {{ session.created_at ? formatDate(session.created_at) : 'Unknown date' }}
+        </div>
+        <div matListItemMeta>
+          <button 
+            mat-icon-button 
+            color="warn" 
+            (click)="deleteSession(session, $event)"
+            aria-label="Delete chat session">
+            <mat-icon>delete</mat-icon>
+          </button>
+        </div>
+      </mat-list-item>
+    </mat-nav-list>
+  </div>
+</div> 

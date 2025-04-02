@@ -1,0 +1,78 @@
+<div class="document-list-container">
+  <div class="document-list-header">
+    <h2>Documents</h2>
+    <button 
+      mat-raised-button 
+      color="primary" 
+      (click)="uploadDocument()">
+      <mat-icon>upload_file</mat-icon>
+      Upload Document
+    </button>
+  </div>
+  
+  <div class="document-list-content">
+    <app-loading-spinner 
+      *ngIf="isLoading" 
+      [diameter]="40" 
+      message="Loading documents...">
+    </app-loading-spinner>
+    
+    <mat-card 
+      *ngIf="!(documents$ | async)?.length && !isLoading" 
+      class="empty-state">
+      <mat-card-content>
+        <p>You don't have any documents yet.</p>
+        <p>Upload a document to get started!</p>
+      </mat-card-content>
+      <mat-card-actions align="end">
+        <button 
+          mat-raised-button 
+          color="primary" 
+          (click)="uploadDocument()">
+          Upload Document
+        </button>
+      </mat-card-actions>
+    </mat-card>
+    
+    <div class="document-grid">
+      <mat-card 
+        *ngFor="let document of (documents$ | async)" 
+        class="document-card"
+        (click)="document.id && viewDocument(document.id)">
+        <mat-card-header>
+          <mat-icon mat-card-avatar [ngClass]="'file-icon-' + (document.file_type || 'default')">
+            {{ document.file_type === 'pdf' ? 'picture_as_pdf' : 
+               document.file_type === 'docx' ? 'description' : 
+               document.file_type === 'txt' ? 'article' : 'insert_drive_file' }}
+          </mat-icon>
+          <mat-card-title>{{ document.filename || 'Unnamed Document' }}</mat-card-title>
+          <mat-card-subtitle>
+            {{ document.file_size ? formatFileSize(document.file_size) : '0 B' }} | {{ document.created_at ? formatDate(document.created_at) : 'Unknown date' }}
+          </mat-card-subtitle>
+        </mat-card-header>
+        <mat-card-content>
+          <div class="document-status">
+            <mat-chip [ngStyle]="{'background-color': getStatusColor(document.status)}">
+              {{ document.status || 'Unknown' }}
+            </mat-chip>
+          </div>
+          <p *ngIf="document.metadata?.title" class="document-title">
+            {{ document.metadata.title }}
+          </p>
+          <p *ngIf="document.metadata?.description" class="document-description">
+            {{ document.metadata.description }}
+          </p>
+        </mat-card-content>
+        <mat-card-actions align="end">
+          <button 
+            mat-icon-button 
+            color="warn" 
+            (click)="deleteDocument(document, $event)"
+            aria-label="Delete document">
+            <mat-icon>delete</mat-icon>
+          </button>
+        </mat-card-actions>
+      </mat-card>
+    </div>
+  </div>
+</div> 

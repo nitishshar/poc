@@ -269,7 +269,7 @@ def list_documents() -> List[DocumentModel]:
     return list(document_store.values())
 
 
-def delete_document(document_id: UUID) -> bool:
+async def delete_document(document_id: UUID) -> bool:
     """Delete a document from the document store.
     
     Args:
@@ -285,7 +285,7 @@ def delete_document(document_id: UUID) -> bool:
     try:
         # Delete the document's Chroma DB collection if it exists
         if document.embedding_collection_name:
-            asyncio.run(delete_collection(document.embedding_collection_name))
+            await delete_collection(document.embedding_collection_name)
         
         # Delete the document from the store
         del document_store[document_id]

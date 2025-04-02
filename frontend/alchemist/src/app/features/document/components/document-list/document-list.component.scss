@@ -1,0 +1,101 @@
+.document-list-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.document-list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+
+  h2 {
+    margin: 0;
+  }
+}
+
+.document-list-content {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.document-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+  padding: 8px 0;
+}
+
+.document-card {
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+
+  &:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  }
+}
+
+.document-status {
+  margin: 8px 0;
+}
+
+.document-title {
+  font-weight: 500;
+  margin: 8px 0;
+}
+
+.document-description {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: rgba(0, 0, 0, 0.6);
+}
+
+.empty-state {
+  text-align: center;
+  padding: 32px 16px;
+  margin: 16px 0;
+
+  p {
+    margin-bottom: 8px;
+    color: rgba(0, 0, 0, 0.6);
+  }
+}
+
+.file-icon-pdf {
+  color: #f44336;
+}
+
+.file-icon-docx {
+  color: #2196f3;
+}
+
+.file-icon-txt {
+  color: #4caf50;
+}
+
+.file-icon-default {
+  color: #9e9e9e;
+}
+
+/* Responsive adjustments */
+@media (max-width: 600px) {
+  .document-list-header {
+    flex-direction: column;
+    align-items: stretch;
+
+    h2 {
+      margin-bottom: 16px;
+      text-align: center;
+    }
+  }
+
+  .document-grid {
+    grid-template-columns: 1fr;
+  }
+}
+ 

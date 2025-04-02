@@ -1,0 +1,149 @@
+.app-container {
+  display: flex;
+  flex-direction: column;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background-color: var(--background-color);
+  background-image: radial-gradient(
+      at 47% 33%,
+      rgba(100, 181, 246, 0.1) 0px,
+      transparent 50%
+    ),
+    radial-gradient(at 82% 65%, rgba(100, 181, 246, 0.05) 0px, transparent 50%);
+}
+
+.toolbar-spacer {
+  flex: 1 1 auto;
+}
+
+mat-toolbar {
+  background-color: var(--toolbar-background) !important;
+  backdrop-filter: blur(var(--blur-amount));
+  -webkit-backdrop-filter: blur(var(--blur-amount));
+  border-bottom: var(--glass-border);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  position: relative;
+  z-index: 10;
+  color: var(--text-color);
+  padding: 0 16px;
+  height: 64px;
+}
+
+mat-sidenav-container {
+  flex: 1;
+  background: transparent !important;
+  position: relative;
+}
+
+mat-sidenav {
+  width: 250px;
+  background-color: var(--glass-background) !important;
+  backdrop-filter: blur(var(--blur-amount));
+  -webkit-backdrop-filter: blur(var(--blur-amount));
+  border-right: var(--glass-border);
+  box-shadow: 0 0 15px rgba(0, 0, 0, 0.1);
+}
+
+mat-sidenav-content {
+  background: transparent !important;
+}
+
+.content-container {
+  padding: 24px;
+  height: calc(100% - 48px);
+  overflow-y: auto;
+}
+
+.nav-link-text {
+  margin-left: 12px;
+  font-weight: 300;
+}
+
+.app-title {
+  margin-left: 16px;
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.active-link {
+  background-color: rgba(0, 0, 0, 0.04);
+  color: #3f51b5;
+}
+
+/* Responsive adjustments */
+@media (max-width: 600px) {
+  .app-container {
+    margin-top: 56px; /* Height of toolbar on small screens */
+  }
+
+  .app-sidenav {
+    width: 200px;
+  }
+
+  .content-container {
+    padding: 16px;
+  }
+
+  mat-toolbar {
+    height: 56px;
+  }
+}
+
+.container {
+  height: 100%;
+}
+
+.spacer {
+  flex: 1 1 auto;
+}
+
+.mat-drawer {
+  background-color: var(--background-darker);
+  color: var(--text-color);
+}
+
+.mat-drawer-container {
+  background-color: transparent;
+  color: var(--text-color);
+}
+
+/* Material button styles */
+.mat-mdc-icon-button {
+  color: var(--text-color);
+}
+
+/* Logo styling */
+.app-logo {
+  display: flex;
+  align-items: center;
+  font-weight: 500;
+  font-size: 20px;
+
+  span {
+    margin-left: 8px;
+  }
+}
+
+/* Ensure menu has proper styling */
+::ng-deep .mat-mdc-menu-panel {
+  background-color: var(--glass-card-background) !important;
+  backdrop-filter: blur(var(--blur-amount));
+  -webkit-backdrop-filter: blur(var(--blur-amount));
+  border: var(--glass-border);
+  border-radius: var(--border-radius);
+
+  .mat-mdc-menu-item {
+    color: var(--text-color);
+
+    .mat-icon {
+      color: var(--text-color);
+    }
+
+    &:hover {
+      background-color: rgba(255, 255, 255, 0.08);
+    }
+  }
+}
