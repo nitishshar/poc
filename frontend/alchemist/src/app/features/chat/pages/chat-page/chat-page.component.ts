@@ -1,27 +1,43 @@
 import { CommonModule } from '@angular/common';
 import { Component } from '@angular/core';
-import { MatCardModule } from '@angular/material/card';
+import { MatTooltipModule } from '@angular/material/tooltip';
+import { ChatInterfaceComponent } from '../../components/chat-interface/chat-interface.component';
 
 @Component({
   selector: 'app-chat-page',
   standalone: true,
-  imports: [CommonModule, MatCardModule],
+  imports: [CommonModule, ChatInterfaceComponent, MatTooltipModule],
   template: `
-    <div class="chat-container">
-      <mat-card>
-        <mat-card-header>
-          <mat-card-title>Chat Sessions</mat-card-title>
-        </mat-card-header>
-        <mat-card-content>
-          <p>Your chat sessions will appear here.</p>
-        </mat-card-content>
-      </mat-card>
+    <div class="chat-page-container">
+      <div class="section-header">
+        <h1>Chat</h1>
+      </div>
+      <app-chat-interface></app-chat-interface>
     </div>
   `,
   styles: [
     `
-      .chat-container {
-        padding: 20px;
+      .chat-page-container {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        padding: 24px;
+      }
+
+      .section-header {
+        margin-bottom: 24px;
+      }
+
+      .section-header h1 {
+        font-size: 28px;
+        font-weight: 400;
+        margin: 0;
+        color: var(--text-color);
+      }
+
+      app-chat-interface {
+        flex: 1;
+        min-height: 500px;
       }
     `,
   ],
