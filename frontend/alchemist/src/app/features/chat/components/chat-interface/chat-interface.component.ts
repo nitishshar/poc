@@ -2,30 +2,45 @@ import { CommonModule } from '@angular/common';
 import {
   Component,
   ElementRef,
-  Inject,
+  OnDestroy,
   OnInit,
   ViewChild,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
+import { MatCardModule } from '@angular/material/card';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
 import { MatListModule } from '@angular/material/list';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatTableModule } from '@angular/material/table';
 import { MatTooltipModule } from '@angular/material/tooltip';
-import { ThemeService } from '../../../../core/services/theme.service';
+import { Subject, take, takeUntil } from 'rxjs';
+import { ChatSession, ContentItem } from '../../models/chat.types';
+import { ChatService } from '../../services/chat.service';
+import { ContentTypeRendererComponent } from '../content-type-renderer/content-type-renderer.component';
 
-interface Message {
-  content: string;
-  isUser: boolean;
-  timestamp: Date;
+interface TableData {
+  columns: string[];
+  rows: any[];
 }
 
-interface ChatSession {
-  id: string;
-  title: string;
-  messages: Message[];
-  lastMessageTime: Date;
+interface GraphData {
+  type: 'line' | 'bar' | 'pie';
+  data: any[];
+}
+
+interface CardData {
+  title?: string;
+  subtitle?: string;
+  content: string;
+  image?: string;
+}
+
+interface Message {
+  contents: ContentItem[];
+  isUser: boolean;
+  timestamp: Date;
 }
 
 @Component({
@@ -40,6 +55,9 @@ interface ChatSession {
     MatListModule,
     MatProgressSpinnerModule,
     MatTooltipModule,
+    MatTableModule,
+    MatCardModule,
+    ContentTypeRendererComponent,
   ],
   template: `
     <div class="chat-container glass-effect">
@@ -48,7 +66,7 @@ interface ChatSession {
           <h3>Chat History</h3>
           <button
             mat-icon-button
-            (click)="createNewChat()"
+            (click)="chatService.createNewChat()"
             matTooltip="New chat"
           >
             <mat-icon>add</mat-icon>
@@ -56,19 +74,23 @@ interface ChatSession {
         </div>
         <mat-nav-list class="chat-history">
           <mat-list-item
-            *ngFor="let session of chatSessions"
-            [class.active]="session.id === currentSessionId"
-            (click)="switchSession(session.id)"
+            *ngFor="let session of chatService.sessions$ | async"
+            [class.active]="
+              session.id === (chatService.currentSessionId$ | async)
+            "
+            (click)="chatService.switchSession(session.id)"
           >
             <div class="session-item">
-              <div class="session-title">{{ session.title }}</div>
+              <div class="session-title">
+                {{ chatService.generateSessionTitle(session) }}
+              </div>
               <div class="session-time">
                 {{ session.lastMessageTime | date : 'shortTime' }}
               </div>
             </div>
             <button
               mat-icon-button
-              (click)="deleteSession(session.id, $event)"
+              (click)="onDeleteSession(session.id, $event)"
               matTooltip="Delete chat"
             >
               <mat-icon>delete</mat-icon>
@@ -79,11 +101,11 @@ interface ChatSession {
 
       <div class="chat-main">
         <div class="chat-header">
-          <h2>{{ getCurrentSession()?.title || 'New Chat' }}</h2>
+          <h2>{{ getCurrentSessionTitle() }}</h2>
           <div class="chat-actions">
             <button
               mat-icon-button
-              (click)="clearCurrentChat()"
+              (click)="chatService.clearCurrentChat()"
               matTooltip="Clear chat"
             >
               <mat-icon>delete</mat-icon>
@@ -92,19 +114,28 @@ interface ChatSession {
         </div>
 
         <div class="chat-messages" #chatMessages>
-          <div
-            *ngFor="let message of getCurrentSession()?.messages || []"
-            class="message-container"
-            [class.user]="message.isUser"
-          >
-            <div class="message glass-effect">
-              <div class="message-content">{{ message.content }}</div>
-              <div class="message-timestamp">
-                {{ message.timestamp | date : 'shortTime' }}
+          <ng-container *ngIf="chatService.messages$ | async as messages">
+            <div *ngIf="messages.length === 0" class="empty-chat">
+              <div class="empty-message">
+                Start a conversation by typing a message below.
               </div>
             </div>
-          </div>
-          <div *ngIf="isLoading" class="loading-container">
+            <div
+              *ngFor="let message of messages"
+              class="message-container"
+              [class.user]="message.isUser"
+            >
+              <div class="message glass-effect">
+                <div class="message-content">
+                  <div class="text-content">{{ message.content }}</div>
+                </div>
+                <div class="message-timestamp">
+                  {{ message.timestamp | date : 'shortTime' }}
+                </div>
+              </div>
+            </div>
+          </ng-container>
+          <div *ngIf="chatService.loading$ | async" class="loading-container">
             <mat-progress-spinner
               diameter="24"
               mode="indeterminate"
@@ -259,7 +290,7 @@ interface ChatSession {
       .message-container {
         display: flex;
         flex-direction: column;
-        max-width: 80%;
+        max-width: 90%;
       }
 
       .message-container.user {
@@ -282,9 +313,95 @@ interface ChatSession {
       }
 
       .message-content {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      .text-content {
         font-size: 14px;
         line-height: 1.5;
         word-wrap: break-word;
+      }
+
+      .image-content {
+        max-width: 100%;
+        overflow: hidden;
+        border-radius: 4px;
+
+        img {
+          max-width: 100%;
+          height: auto;
+          display: block;
+        }
+      }
+
+      .table-content {
+        width: 100%;
+        overflow-x: auto;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 4px;
+
+        table {
+          width: 100%;
+        }
+
+        th {
+          font-weight: 500;
+          color: var(--text-color);
+          opacity: 0.9;
+        }
+
+        td {
+          color: var(--text-color);
+        }
+      }
+
+      .card-content {
+        width: 100%;
+        background: rgba(255, 255, 255, 0.05) !important;
+        border: var(--glass-border);
+
+        img {
+          max-height: 200px;
+          object-fit: cover;
+        }
+
+        mat-card-title {
+          color: var(--text-color);
+          font-size: 16px;
+        }
+
+        mat-card-subtitle {
+          color: var(--secondary-text-color);
+        }
+
+        mat-card-content {
+          color: var(--text-color);
+          font-size: 14px;
+          line-height: 1.5;
+        }
+      }
+
+      .html-content {
+        width: 100%;
+        overflow-x: auto;
+      }
+
+      /* Deep styling for HTML content */
+      ::ng-deep .html-content {
+        color: var(--text-color);
+      }
+
+      ::ng-deep .html-content a {
+        color: var(--primary-color);
+      }
+
+      ::ng-deep .html-content pre,
+      ::ng-deep .html-content code {
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 4px;
+        padding: 8px;
       }
 
       .message-timestamp {
@@ -462,125 +579,92 @@ interface ChatSession {
       ::ng-deep .mat-mdc-form-field-icon-suffix:hover {
         color: var(--primary-color);
       }
+
+      .empty-chat {
+        flex: 1;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100%;
+      }
+
+      .empty-message {
+        color: var(--secondary-text-color);
+        font-style: italic;
+        text-align: center;
+        padding: 20px;
+      }
     `,
   ],
 })
-export class ChatInterfaceComponent implements OnInit {
+export class ChatInterfaceComponent implements OnInit, OnDestroy {
   @ViewChild('chatMessages') private chatMessages!: ElementRef;
 
-  chatSessions: ChatSession[] = [];
-  currentSessionId: string = '';
   userInput = '';
   isLoading = false;
+  currentSession: ChatSession | null = null;
+  private destroy$ = new Subject<void>();
 
-  constructor(@Inject(ThemeService) private themeService: ThemeService) {}
+  constructor(public chatService: ChatService) {}
 
   ngOnInit(): void {
-    this.loadSessions();
-    if (this.chatSessions.length === 0) {
-      this.createNewChat();
-    } else {
-      this.currentSessionId = this.chatSessions[0].id;
-    }
-  }
+    console.log('ChatInterfaceComponent initialized');
 
-  createNewChat(): void {
-    const newSession: ChatSession = {
-      id: this.generateId(),
-      title: 'New Chat',
-      messages: [],
-      lastMessageTime: new Date(),
-    };
-    this.chatSessions.unshift(newSession);
-    this.currentSessionId = newSession.id;
-    this.saveSessions();
-  }
+    // Subscribe to state changes
+    this.chatService
+      .getState()
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((state) => {
+        console.log('Chat state updated:', state);
+        this.isLoading = state.isLoading;
+        this.currentSession = state.currentSession;
+        console.log('Current session messages:', this.currentSession?.messages);
 
-  switchSession(sessionId: string): void {
-    this.currentSessionId = sessionId;
-  }
-
-  deleteSession(sessionId: string, event: Event): void {
-    event.stopPropagation();
-    const index = this.chatSessions.findIndex((s) => s.id === sessionId);
-    if (index !== -1) {
-      this.chatSessions.splice(index, 1);
-      if (this.currentSessionId === sessionId) {
-        this.currentSessionId = this.chatSessions[0]?.id || '';
-        if (!this.currentSessionId) {
-          this.createNewChat();
+        // Scroll to bottom when new messages arrive
+        if (this.currentSession?.messages?.length) {
+          setTimeout(() => this.scrollToBottom(), 100);
         }
+      });
+
+    // Check if we need to create an initial chat
+    this.chatService.sessions$.pipe(take(1)).subscribe((sessions) => {
+      if (sessions.length === 0) {
+        console.log('No sessions found, creating a new chat');
+        this.chatService.createNewChat();
       }
-      this.saveSessions();
-    }
+    });
   }
 
-  getCurrentSession(): ChatSession | undefined {
-    return this.chatSessions.find((s) => s.id === this.currentSessionId);
+  ngOnDestroy(): void {
+    this.destroy$.next();
+    this.destroy$.complete();
+  }
+
+  getCurrentSessionTitle(): string {
+    const session = this.currentSession;
+    if (!session) return 'New Chat';
+
+    if (session.messages.length === 0) {
+      return 'New Chat';
+    }
+
+    // Get the first user message as the title
+    const firstUserMessage = session.messages.find((m) => m.isUser);
+    return firstUserMessage
+      ? firstUserMessage.content.substring(0, 20) +
+          (firstUserMessage.content.length > 20 ? '...' : '')
+      : 'Chat ' + new Date(session.created).toLocaleString();
+  }
+
+  onDeleteSession(sessionId: string, event: Event): void {
+    event.stopPropagation();
+    this.chatService.deleteSession(sessionId);
   }
 
   sendMessage(): void {
-    if (!this.userInput.trim() || !this.currentSessionId) return;
-
-    const currentSession = this.getCurrentSession();
-    if (!currentSession) return;
-
-    // Add user message
-    this.addMessage(currentSession, this.userInput, true);
+    if (!this.userInput.trim()) return;
+    this.chatService.sendMessage(this.userInput);
     this.userInput = '';
-
-    // Simulate loading state
-    this.isLoading = true;
-
-    // Scroll to bottom
-    setTimeout(() => {
-      this.scrollToBottom();
-    }, 100);
-
-    // Simulate response (replace with actual API call)
-    setTimeout(() => {
-      this.addMessage(
-        currentSession,
-        'This is a simulated response. Replace with actual API call.',
-        false
-      );
-      this.isLoading = false;
-      this.scrollToBottom();
-      this.saveSessions();
-    }, 1000);
-  }
-
-  clearCurrentChat(): void {
-    const currentSession = this.getCurrentSession();
-    if (currentSession) {
-      currentSession.messages = [];
-      this.addMessage(
-        currentSession,
-        'Hello! How can I help you today?',
-        false
-      );
-      this.saveSessions();
-    }
-  }
-
-  private addMessage(
-    session: ChatSession,
-    content: string,
-    isUser: boolean
-  ): void {
-    const message: Message = {
-      content,
-      isUser,
-      timestamp: new Date(),
-    };
-    session.messages.push(message);
-    session.lastMessageTime = new Date();
-
-    // Update session title based on first user message
-    if (isUser && session.title === 'New Chat') {
-      session.title =
-        content.length > 30 ? content.substring(0, 30) + '...' : content;
-    }
   }
 
   private scrollToBottom(): void {
@@ -592,25 +676,8 @@ export class ChatInterfaceComponent implements OnInit {
     }
   }
 
-  private generateId(): string {
-    return Math.random().toString(36).substring(2, 15);
-  }
-
-  private loadSessions(): void {
-    const savedSessions = localStorage.getItem('chatSessions');
-    if (savedSessions) {
-      this.chatSessions = JSON.parse(savedSessions).map((session: any) => ({
-        ...session,
-        lastMessageTime: new Date(session.lastMessageTime),
-        messages: session.messages.map((msg: any) => ({
-          ...msg,
-          timestamp: new Date(msg.timestamp),
-        })),
-      }));
-    }
-  }
-
-  private saveSessions(): void {
-    localStorage.setItem('chatSessions', JSON.stringify(this.chatSessions));
+  // Type guard for CardData
+  isCardContent(content: any): content is CardData {
+    return content && typeof content === 'object' && 'content' in content;
   }
 }
