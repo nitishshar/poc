@@ -16,8 +16,9 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
 import { MatTableModule } from '@angular/material/table';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { Subject, take, takeUntil } from 'rxjs';
-import { ChatSession, ContentItem } from '../../models/chat.types';
+import { ChatExample, ChatSession, ContentItem } from '../../models/chat.types';
 import { ChatService } from '../../services/chat.service';
+import { ChatExamplesComponent } from '../chat-examples/chat-examples.component';
 import { ContentTypeRendererComponent } from '../content-type-renderer/content-type-renderer.component';
 
 interface TableData {
@@ -58,6 +59,7 @@ interface Message {
     MatTableModule,
     MatCardModule,
     ContentTypeRendererComponent,
+    ChatExamplesComponent,
   ],
   template: `
     <div class="chat-container glass-effect">
@@ -115,11 +117,27 @@ interface Message {
 
         <div class="chat-messages" #chatMessages>
           <ng-container *ngIf="chatService.messages$ | async as messages">
-            <div *ngIf="messages.length === 0" class="empty-chat">
+            <!-- Empty chat state -->
+            <div
+              *ngIf="messages.length === 0 && !(chatService.loading$ | async)"
+              class="empty-chat"
+            >
               <div class="empty-message">
-                Start a conversation by typing a message below.
+                <h3>Welcome to your chat assistant</h3>
+                <p>
+                  Select one of these examples or type your own message below.
+                </p>
               </div>
+
+              <!-- Only show chat examples in empty state -->
+              <app-chat-examples
+                [examples]="chatService.getExamples()"
+                [title]="'Example questions'"
+                (exampleSelected)="onExampleSelected($event)"
+              ></app-chat-examples>
             </div>
+
+            <!-- Messages display -->
             <div
               *ngFor="let message of messages"
               class="message-container"
@@ -127,7 +145,22 @@ interface Message {
             >
               <div class="message glass-effect">
                 <div class="message-content">
-                  <div class="text-content">{{ message.content }}</div>
+                  <!-- Display plain text if no content items -->
+                  <div class="text-content" *ngIf="!message.contentItems">
+                    {{ message.content }}
+                  </div>
+
+                  <!-- Display content items if available -->
+                  <ng-container
+                    *ngIf="
+                      message.contentItems && message.contentItems.length > 0
+                    "
+                  >
+                    <app-content-type-renderer
+                      *ngFor="let item of message.contentItems"
+                      [content]="item"
+                    ></app-content-type-renderer>
+                  </ng-container>
                 </div>
                 <div class="message-timestamp">
                   {{ message.timestamp | date : 'shortTime' }}
@@ -135,6 +168,8 @@ interface Message {
               </div>
             </div>
           </ng-container>
+
+          <!-- Loading indicator -->
           <div *ngIf="chatService.loading$ | async" class="loading-container">
             <mat-progress-spinner
               diameter="24"
@@ -145,6 +180,7 @@ interface Message {
         </div>
 
         <div class="chat-input-container">
+          <!-- Only show examples in the empty chat state, not in the input area -->
           <mat-form-field class="chat-input">
             <mat-label>Type your message</mat-label>
             <input
@@ -166,8 +202,10 @@ interface Message {
       .chat-container {
         display: flex;
         height: 100%;
-        min-height: 500px;
-        border-radius: var(--border-radius);
+        gap: 1px;
+        background: var(--glass-background);
+        border: var(--glass-border);
+        border-radius: 8px;
         overflow: hidden;
       }
 
@@ -220,13 +258,14 @@ interface Message {
       }
 
       .session-item {
-        flex: 1;
         display: flex;
         flex-direction: row;
         justify-content: space-between;
         align-items: center;
         gap: 8px;
         padding: 0;
+        flex: 1;
+        overflow: hidden;
       }
 
       .session-title {
@@ -247,6 +286,10 @@ interface Message {
         white-space: nowrap;
       }
 
+      .active {
+        background: rgba(var(--primary-color-rgb), 0.1);
+      }
+
       .chat-main {
         flex: 1;
         display: flex;
@@ -255,26 +298,11 @@ interface Message {
       }
 
       .chat-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
         padding: 16px;
-        border-bottom: var(--glass-border);
-        background-color: var(--glass-background);
-        backdrop-filter: blur(var(--blur-amount));
-        -webkit-backdrop-filter: blur(var(--blur-amount));
-      }
-
-      .chat-header h2 {
-        margin: 0;
-        font-size: 20px;
-        font-weight: 500;
-        color: var(--text-color);
-      }
-
-      .chat-actions {
         display: flex;
-        gap: 8px;
+        align-items: center;
+        justify-content: space-between;
+        border-bottom: var(--glass-border);
       }
 
       .chat-messages {
@@ -283,106 +311,103 @@ interface Message {
         padding: 16px;
         display: flex;
         flex-direction: column;
-        gap: 16px;
-        background-color: var(--background-color);
       }
 
       .message-container {
         display: flex;
-        flex-direction: column;
-        max-width: 90%;
-      }
+        margin-bottom: 16px;
 
-      .message-container.user {
-        align-items: flex-end;
+        &.user {
+          justify-content: flex-end;
+
+          .message {
+            background: rgba(var(--primary-color-rgb), 0.05);
+            border-color: rgba(var(--primary-color-rgb), 0.2);
+          }
+        }
       }
 
       .message {
+        max-width: 80%;
         padding: 12px 16px;
-        border-radius: var(--border-radius);
-        background-color: var(--glass-card-background);
-        backdrop-filter: blur(var(--blur-amount));
-        -webkit-backdrop-filter: blur(var(--blur-amount));
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.05);
         border: var(--glass-border);
-        box-shadow: var(--card-shadow);
-      }
-
-      .message-container.user .message {
-        background-color: var(--primary-color);
-        color: white;
+        box-shadow: var(--glass-shadow);
+        display: flex;
+        flex-direction: column;
       }
 
       .message-content {
-        display: flex;
-        flex-direction: column;
-        gap: 12px;
+        color: var(--text-color);
+        font-size: 14px;
+        line-height: 1.5;
+        word-break: break-word;
       }
 
+      .message-timestamp {
+        font-size: 11px;
+        color: var(--secondary-text-color);
+        text-align: right;
+        margin-top: 4px;
+      }
+
+      .chat-input-container {
+        padding: 16px;
+        border-top: var(--glass-border);
+      }
+
+      .chat-input {
+        width: 100%;
+      }
+
+      .loading-container {
+        display: flex;
+        justify-content: center;
+        padding: 16px;
+      }
+
+      .empty-chat {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        height: 100%;
+        padding: 20px;
+        max-width: 600px;
+        margin: 0 auto;
+      }
+
+      .empty-message {
+        color: var(--text-color);
+        font-style: italic;
+        text-align: center;
+        padding: 20px;
+        margin-bottom: 20px;
+        font-size: 16px;
+
+        h3 {
+          margin-bottom: 12px;
+          font-size: 24px;
+          font-weight: 500;
+          color: var(--primary-color);
+        }
+
+        p {
+          margin: 0;
+          opacity: 0.9;
+        }
+      }
+
+      /* For tables */
       .text-content {
         font-size: 14px;
         line-height: 1.5;
         word-wrap: break-word;
       }
 
-      .image-content {
-        max-width: 100%;
-        overflow: hidden;
-        border-radius: 4px;
-
-        img {
-          max-width: 100%;
-          height: auto;
-          display: block;
-        }
-      }
-
-      .table-content {
-        width: 100%;
-        overflow-x: auto;
-        background: rgba(255, 255, 255, 0.05);
-        border-radius: 4px;
-
-        table {
-          width: 100%;
-        }
-
-        th {
-          font-weight: 500;
-          color: var(--text-color);
-          opacity: 0.9;
-        }
-
-        td {
-          color: var(--text-color);
-        }
-      }
-
-      .card-content {
-        width: 100%;
-        background: rgba(255, 255, 255, 0.05) !important;
-        border: var(--glass-border);
-
-        img {
-          max-height: 200px;
-          object-fit: cover;
-        }
-
-        mat-card-title {
-          color: var(--text-color);
-          font-size: 16px;
-        }
-
-        mat-card-subtitle {
-          color: var(--secondary-text-color);
-        }
-
-        mat-card-content {
-          color: var(--text-color);
-          font-size: 14px;
-          line-height: 1.5;
-        }
-      }
-
+      /* For HTML content */
       .html-content {
         width: 100%;
         overflow-x: auto;
@@ -402,45 +427,6 @@ interface Message {
         background: rgba(255, 255, 255, 0.05);
         border-radius: 4px;
         padding: 8px;
-      }
-
-      .message-timestamp {
-        font-size: 11px;
-        opacity: 0.7;
-        margin-top: 4px;
-        text-align: right;
-      }
-
-      .chat-input-container {
-        padding: 16px;
-        border-top: var(--glass-border);
-        background-color: var(--glass-background);
-        backdrop-filter: blur(var(--blur-amount));
-        -webkit-backdrop-filter: blur(var(--blur-amount));
-      }
-
-      .chat-input {
-        width: 100%;
-      }
-
-      .loading-container {
-        display: flex;
-        justify-content: center;
-        padding: 16px;
-      }
-
-      /* Custom scrollbar for chat messages */
-      .chat-messages::-webkit-scrollbar {
-        width: 8px;
-      }
-
-      .chat-messages::-webkit-scrollbar-track {
-        background: var(--background-lighter);
-      }
-
-      .chat-messages::-webkit-scrollbar-thumb {
-        background: var(--primary-color);
-        border-radius: 4px;
       }
 
       /* Material list overrides */
@@ -579,21 +565,6 @@ interface Message {
       ::ng-deep .mat-mdc-form-field-icon-suffix:hover {
         color: var(--primary-color);
       }
-
-      .empty-chat {
-        flex: 1;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        height: 100%;
-      }
-
-      .empty-message {
-        color: var(--secondary-text-color);
-        font-style: italic;
-        text-align: center;
-        padding: 20px;
-      }
     `,
   ],
 })
@@ -631,8 +602,17 @@ export class ChatInterfaceComponent implements OnInit, OnDestroy {
       if (sessions.length === 0) {
         console.log('No sessions found, creating a new chat');
         this.chatService.createNewChat();
+
+        // Add example suggestions after a short delay to ensure state is updated
+        setTimeout(() => {
+          console.log('Adding example suggestions');
+          this.chatService.addAllExamples();
+        }, 500);
       }
     });
+
+    // Check if examples are available
+    console.log('Available examples:', this.chatService.getExamples());
   }
 
   ngOnDestroy(): void {
@@ -665,6 +645,18 @@ export class ChatInterfaceComponent implements OnInit, OnDestroy {
     if (!this.userInput.trim()) return;
     this.chatService.sendMessage(this.userInput);
     this.userInput = '';
+  }
+
+  onExampleSelected(example: ChatExample): void {
+    console.log('Example selected in component:', example);
+
+    // Set the input field if it's just a text example
+    if (!example.contentItems) {
+      this.userInput = example.text;
+    }
+
+    // Let the service handle the example
+    this.chatService.handleExampleSelection(example);
   }
 
   private scrollToBottom(): void {

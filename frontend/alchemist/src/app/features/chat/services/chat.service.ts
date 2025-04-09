@@ -4,10 +4,13 @@ import { map } from 'rxjs/operators';
 import { v4 as uuidv4 } from 'uuid';
 
 import {
+  CHAT_EXAMPLES,
+  ChatExample,
   ChatMessage,
   ChatSession,
   ChatState,
   ContentItem,
+  EXAMPLE_CONTENT,
 } from '../models/chat.types';
 import { ChatStorageService } from './chat-storage.service';
 
@@ -22,14 +25,21 @@ export class ChatService {
   });
 
   private currentSessionIdSubject = new BehaviorSubject<string | null>(null);
+  private examplesSubject = new BehaviorSubject<ChatExample[]>(CHAT_EXAMPLES);
 
   messages$ = this.getMessages();
   loading$ = this.getLoadingState();
   sessions$ = this.getSessions();
   currentSession$ = this.getCurrentSessionObservable();
   currentSessionId$ = this.currentSessionIdSubject.asObservable();
+  examples$ = this.examplesSubject.asObservable();
 
   constructor(private chatStorage: ChatStorageService) {
+    console.log('Chat service initialized');
+
+    // Log the available examples
+    console.log('Chat examples:', CHAT_EXAMPLES);
+
     this.loadSessions();
   }
 
@@ -143,6 +153,12 @@ export class ChatService {
     // Add user message
     this.addMessage(userMessage);
 
+    // Check if this is a special example message
+    if (content.toLowerCase().includes('pie chart')) {
+      this.processExampleResponse(content);
+      return;
+    }
+
     // Set loading state
     this.state.next({
       ...this.state.value,
@@ -155,14 +171,34 @@ export class ChatService {
       // For now, simulate a response
       await new Promise((resolve) => setTimeout(resolve, 1000));
 
-      const botMessage: ChatMessage = {
-        content: 'This is a simulated response.',
-        isUser: false,
-        timestamp: new Date(),
-      };
+      // Process the user's request based on content
+      if (content.toLowerCase().includes('table')) {
+        this.processExampleResponse(content);
+      } else if (
+        content.toLowerCase().includes('chart') ||
+        content.toLowerCase().includes('graph')
+      ) {
+        this.processExampleResponse(content);
+      } else if (
+        content.toLowerCase().includes('card') ||
+        content.toLowerCase().includes('summary')
+      ) {
+        this.processExampleResponse(content);
+      } else if (
+        content.toLowerCase().includes('rich content') ||
+        content.toLowerCase().includes('all')
+      ) {
+        this.addAllExamples();
+      } else {
+        const botMessage: ChatMessage = {
+          content: 'This is a simulated response.',
+          isUser: false,
+          timestamp: new Date(),
+        };
 
-      console.log('Adding bot response:', botMessage);
-      this.addMessage(botMessage);
+        console.log('Adding bot response:', botMessage);
+        this.addMessage(botMessage);
+      }
     } finally {
       this.state.next({
         ...this.state.value,
@@ -261,15 +297,206 @@ export class ChatService {
     contentItems: ContentItem[],
     isUser: boolean
   ): void {
-    // This is a stub method to support the existing component
-    const message = {
+    // Create a message with rich content
+    const message: ChatMessage = {
       content: contentItems
         .map((c) => (c.type === 'text' ? c.content : ''))
         .join(' '),
+      contentItems: contentItems,
       isUser,
       timestamp: new Date(),
     };
 
     this.addMessage(message);
+  }
+
+  // Get the current examples
+  getExamples(): ChatExample[] {
+    console.log('Getting examples:', this.examplesSubject.value);
+    return this.examplesSubject.value;
+  }
+
+  // Set new examples
+  setExamples(examples: ChatExample[]): void {
+    this.examplesSubject.next(examples);
+  }
+
+  // Handle when a user selects an example
+  handleExampleSelection(example: ChatExample): void {
+    console.log('Example selected:', example);
+
+    // If the example has content items, use those to create a rich message
+    if (example.contentItems && example.contentItems.length > 0) {
+      if (!this.state.value.currentSession) {
+        this.createNewChat();
+      }
+
+      this.addMessageWithContent(
+        this.state.value.currentSession!,
+        example.contentItems,
+        true
+      );
+
+      // Now handle the response based on the example text
+      this.processExampleResponse(example.text);
+    } else {
+      // Otherwise just treat it as a regular text message
+      this.sendMessage(example.text);
+    }
+  }
+
+  // Process example response based on the text
+  private processExampleResponse(text: string): void {
+    // This would normally be handled by your API, but for demo purposes
+    // we'll respond with different content types based on the example text
+
+    // Set loading state
+    this.state.next({
+      ...this.state.value,
+      isLoading: true,
+    });
+
+    // Simulate API delay
+    setTimeout(() => {
+      if (text.toLowerCase().includes('table')) {
+        this.addMessageWithContent(
+          this.state.value.currentSession!,
+          [
+            {
+              type: 'text',
+              content: "Here's a data table example:",
+            },
+            EXAMPLE_CONTENT['table'],
+          ],
+          false
+        );
+      } else if (
+        text.toLowerCase().includes('chart') ||
+        text.toLowerCase().includes('graph')
+      ) {
+        if (text.toLowerCase().includes('pie')) {
+          this.addMessageWithContent(
+            this.state.value.currentSession!,
+            [
+              {
+                type: 'text',
+                content: "Here's a pie chart example:",
+              },
+              EXAMPLE_CONTENT['pieChart'],
+            ],
+            false
+          );
+        } else if (text.toLowerCase().includes('line')) {
+          this.addMessageWithContent(
+            this.state.value.currentSession!,
+            [
+              {
+                type: 'text',
+                content: "Here's a line chart example:",
+              },
+              EXAMPLE_CONTENT['lineChart'],
+            ],
+            false
+          );
+        } else {
+          this.addMessageWithContent(
+            this.state.value.currentSession!,
+            [
+              {
+                type: 'text',
+                content: "Here's a bar chart example:",
+              },
+              EXAMPLE_CONTENT['barChart'],
+            ],
+            false
+          );
+        }
+      } else if (
+        text.toLowerCase().includes('card') ||
+        text.toLowerCase().includes('summary')
+      ) {
+        this.addMessageWithContent(
+          this.state.value.currentSession!,
+          [
+            {
+              type: 'text',
+              content: "Here's a card example:",
+            },
+            EXAMPLE_CONTENT['card'],
+          ],
+          false
+        );
+      } else if (
+        text.toLowerCase().includes('rich content') ||
+        text.toLowerCase().includes('all')
+      ) {
+        this.addAllExamples();
+      } else {
+        // Default response
+        const botMessage: ChatMessage = {
+          content: `You asked: "${text}". I'll help you with that!`,
+          isUser: false,
+          timestamp: new Date(),
+        };
+
+        this.addMessage(botMessage);
+      }
+
+      // Clear loading state
+      this.state.next({
+        ...this.state.value,
+        isLoading: false,
+      });
+    }, 1000);
+  }
+
+  // Add all examples at once for demo purposes
+  addAllExamples(): void {
+    if (!this.state.value.currentSession) {
+      this.createNewChat();
+    }
+
+    const botMessage: ChatMessage = {
+      content: 'Here are some examples of rich content:',
+      isUser: false,
+      timestamp: new Date(),
+      contentItems: [
+        {
+          type: 'text',
+          content:
+            'Here are some examples of rich content that our chat interface supports:',
+        },
+        EXAMPLE_CONTENT['table'],
+        EXAMPLE_CONTENT['card'],
+        EXAMPLE_CONTENT['barChart'],
+      ],
+    };
+
+    this.addMessage(botMessage);
+  }
+
+  // Add an example message with rich content like Gradio
+  addExampleMessage(
+    type: 'table' | 'card' | 'barChart' | 'lineChart' | 'pieChart'
+  ): void {
+    if (!this.state.value.currentSession) {
+      this.createNewChat();
+    }
+
+    // Create text item
+    const textItem: ContentItem = {
+      type: 'text',
+      content: `Here's an example ${type}:`,
+    };
+
+    // Get example content based on type
+    const exampleItem = EXAMPLE_CONTENT[type];
+
+    // Add message with rich content
+    this.addMessageWithContent(
+      this.state.value.currentSession!,
+      [textItem, exampleItem],
+      false
+    );
   }
 }
