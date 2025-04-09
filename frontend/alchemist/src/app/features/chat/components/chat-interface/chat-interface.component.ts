@@ -10,13 +10,22 @@ import { FormsModule } from '@angular/forms';
 import { MatButtonModule } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInputModule } from '@angular/material/input';
+import { MatListModule } from '@angular/material/list';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatTooltipModule } from '@angular/material/tooltip';
 import { ThemeService } from '../../../../core/services/theme.service';
 
 interface Message {
   content: string;
   isUser: boolean;
   timestamp: Date;
+}
+
+interface ChatSession {
+  id: string;
+  title: string;
+  messages: Message[];
+  lastMessageTime: Date;
 }
 
 @Component({
@@ -28,54 +37,96 @@ interface Message {
     MatButtonModule,
     MatIconModule,
     MatInputModule,
+    MatListModule,
     MatProgressSpinnerModule,
+    MatTooltipModule,
   ],
   template: `
     <div class="chat-container glass-effect">
-      <div class="chat-header">
-        <h2>Chat</h2>
-        <div class="chat-actions">
-          <button mat-icon-button (click)="clearChat()" matTooltip="Clear chat">
-            <mat-icon>delete</mat-icon>
+      <div class="chat-sidebar">
+        <div class="sidebar-header">
+          <h3>Chat History</h3>
+          <button
+            mat-icon-button
+            (click)="createNewChat()"
+            matTooltip="New chat"
+          >
+            <mat-icon>add</mat-icon>
           </button>
         </div>
+        <mat-nav-list class="chat-history">
+          <mat-list-item
+            *ngFor="let session of chatSessions"
+            [class.active]="session.id === currentSessionId"
+            (click)="switchSession(session.id)"
+          >
+            <div class="session-item">
+              <div class="session-title">{{ session.title }}</div>
+              <div class="session-time">
+                {{ session.lastMessageTime | date : 'shortTime' }}
+              </div>
+            </div>
+            <button
+              mat-icon-button
+              (click)="deleteSession(session.id, $event)"
+              matTooltip="Delete chat"
+            >
+              <mat-icon>delete</mat-icon>
+            </button>
+          </mat-list-item>
+        </mat-nav-list>
       </div>
 
-      <div class="chat-messages" #chatMessages>
-        <div
-          *ngFor="let message of messages"
-          class="message-container"
-          [class.user]="message.isUser"
-        >
-          <div class="message glass-effect">
-            <div class="message-content">{{ message.content }}</div>
-            <div class="message-timestamp">
-              {{ message.timestamp | date : 'shortTime' }}
-            </div>
+      <div class="chat-main">
+        <div class="chat-header">
+          <h2>{{ getCurrentSession()?.title || 'New Chat' }}</h2>
+          <div class="chat-actions">
+            <button
+              mat-icon-button
+              (click)="clearCurrentChat()"
+              matTooltip="Clear chat"
+            >
+              <mat-icon>delete</mat-icon>
+            </button>
           </div>
         </div>
-        <div *ngIf="isLoading" class="loading-container">
-          <mat-progress-spinner
-            diameter="24"
-            mode="indeterminate"
-            color="primary"
-          ></mat-progress-spinner>
-        </div>
-      </div>
 
-      <div class="chat-input-container">
-        <mat-form-field class="chat-input">
-          <mat-label>Type your message</mat-label>
-          <input
-            matInput
-            [(ngModel)]="userInput"
-            (keyup.enter)="sendMessage()"
-            placeholder="Type your message..."
-          />
-          <button mat-icon-button matSuffix (click)="sendMessage()">
-            <mat-icon>send</mat-icon>
-          </button>
-        </mat-form-field>
+        <div class="chat-messages" #chatMessages>
+          <div
+            *ngFor="let message of getCurrentSession()?.messages || []"
+            class="message-container"
+            [class.user]="message.isUser"
+          >
+            <div class="message glass-effect">
+              <div class="message-content">{{ message.content }}</div>
+              <div class="message-timestamp">
+                {{ message.timestamp | date : 'shortTime' }}
+              </div>
+            </div>
+          </div>
+          <div *ngIf="isLoading" class="loading-container">
+            <mat-progress-spinner
+              diameter="24"
+              mode="indeterminate"
+              color="primary"
+            ></mat-progress-spinner>
+          </div>
+        </div>
+
+        <div class="chat-input-container">
+          <mat-form-field class="chat-input">
+            <mat-label>Type your message</mat-label>
+            <input
+              matInput
+              [(ngModel)]="userInput"
+              (keyup.enter)="sendMessage()"
+              placeholder="Type your message..."
+            />
+            <button mat-icon-button matSuffix (click)="sendMessage()">
+              <mat-icon>send</mat-icon>
+            </button>
+          </mat-form-field>
+        </div>
       </div>
     </div>
   `,
@@ -83,10 +134,92 @@ interface Message {
     `
       .chat-container {
         display: flex;
-        flex-direction: column;
         height: 100%;
         min-height: 500px;
         border-radius: var(--border-radius);
+        overflow: hidden;
+      }
+
+      .chat-sidebar {
+        width: 240px;
+        border-right: var(--glass-border);
+        background-color: var(--glass-background);
+        backdrop-filter: blur(var(--blur-amount));
+        -webkit-backdrop-filter: blur(var(--blur-amount));
+        display: flex;
+        flex-direction: column;
+      }
+
+      .sidebar-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 8px;
+        height: 40px;
+        border-bottom: var(--glass-border);
+        background-color: var(--glass-background);
+        backdrop-filter: blur(var(--blur-amount));
+        -webkit-backdrop-filter: blur(var(--blur-amount));
+      }
+
+      .sidebar-header h3 {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 500;
+        color: var(--text-color);
+      }
+
+      .chat-history {
+        flex: 1;
+        overflow-y: auto;
+        padding: 2px 0;
+      }
+
+      .chat-history::-webkit-scrollbar {
+        width: 4px;
+      }
+
+      .chat-history::-webkit-scrollbar-track {
+        background: transparent;
+      }
+
+      .chat-history::-webkit-scrollbar-thumb {
+        background: var(--primary-color);
+        border-radius: 2px;
+      }
+
+      .session-item {
+        flex: 1;
+        display: flex;
+        flex-direction: row;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+        padding: 0;
+      }
+
+      .session-title {
+        font-size: 12px;
+        font-weight: 400;
+        color: var(--text-color);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        line-height: 1.2;
+        flex: 1;
+      }
+
+      .session-time {
+        font-size: 10px;
+        color: var(--secondary-text-color);
+        opacity: 0.7;
+        white-space: nowrap;
+      }
+
+      .chat-main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
         overflow: hidden;
       }
 
@@ -193,6 +326,71 @@ interface Message {
         border-radius: 4px;
       }
 
+      /* Material list overrides */
+      ::ng-deep .mat-mdc-list-item {
+        height: 32px !important;
+        min-height: 32px !important;
+        padding: 0 8px !important;
+        margin: 1px 2px !important;
+        border-radius: calc(var(--border-radius) * 0.5);
+        transition: all 0.2s ease-in-out;
+      }
+
+      ::ng-deep .mat-mdc-list-item:hover {
+        background-color: var(--glass-card-background);
+        backdrop-filter: blur(var(--blur-amount));
+        -webkit-backdrop-filter: blur(var(--blur-amount));
+      }
+
+      ::ng-deep .mat-mdc-list-item.active {
+        background-color: var(--primary-color);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+      }
+
+      ::ng-deep .mat-mdc-list-item.active .session-title {
+        color: white;
+        font-weight: 500;
+      }
+
+      ::ng-deep .mat-mdc-list-item.active .session-time {
+        color: rgba(255, 255, 255, 0.9);
+      }
+
+      ::ng-deep .mat-mdc-list-item .mat-icon {
+        font-size: 14px;
+        width: 14px;
+        height: 14px;
+        opacity: 0;
+        transition: opacity 0.2s ease-in-out;
+        margin-left: 4px;
+      }
+
+      ::ng-deep .mat-mdc-list-item:hover .mat-icon {
+        opacity: 0.7;
+      }
+
+      ::ng-deep .mat-mdc-list-item .mat-icon:hover {
+        opacity: 1;
+      }
+
+      ::ng-deep .mat-mdc-list-item.active .mat-icon {
+        color: white;
+        opacity: 0.9;
+      }
+
+      ::ng-deep .mat-mdc-list-item.active .mat-icon:hover {
+        opacity: 1;
+      }
+
+      ::ng-deep .mat-mdc-list-item .mat-mdc-button-touch-target {
+        height: 32px !important;
+      }
+
+      ::ng-deep .mat-mdc-list-item .mdc-list-item__primary-text {
+        display: flex;
+        align-items: center;
+      }
+
       /* Material form field overrides */
       ::ng-deep .mat-mdc-form-field {
         width: 100%;
@@ -270,22 +468,65 @@ interface Message {
 export class ChatInterfaceComponent implements OnInit {
   @ViewChild('chatMessages') private chatMessages!: ElementRef;
 
-  messages: Message[] = [];
+  chatSessions: ChatSession[] = [];
+  currentSessionId: string = '';
   userInput = '';
   isLoading = false;
 
   constructor(@Inject(ThemeService) private themeService: ThemeService) {}
 
   ngOnInit(): void {
-    // Add welcome message
-    this.addMessage('Hello! How can I help you today?', false);
+    this.loadSessions();
+    if (this.chatSessions.length === 0) {
+      this.createNewChat();
+    } else {
+      this.currentSessionId = this.chatSessions[0].id;
+    }
+  }
+
+  createNewChat(): void {
+    const newSession: ChatSession = {
+      id: this.generateId(),
+      title: 'New Chat',
+      messages: [],
+      lastMessageTime: new Date(),
+    };
+    this.chatSessions.unshift(newSession);
+    this.currentSessionId = newSession.id;
+    this.saveSessions();
+  }
+
+  switchSession(sessionId: string): void {
+    this.currentSessionId = sessionId;
+  }
+
+  deleteSession(sessionId: string, event: Event): void {
+    event.stopPropagation();
+    const index = this.chatSessions.findIndex((s) => s.id === sessionId);
+    if (index !== -1) {
+      this.chatSessions.splice(index, 1);
+      if (this.currentSessionId === sessionId) {
+        this.currentSessionId = this.chatSessions[0]?.id || '';
+        if (!this.currentSessionId) {
+          this.createNewChat();
+        }
+      }
+      this.saveSessions();
+    }
+  }
+
+  getCurrentSession(): ChatSession | undefined {
+    return this.chatSessions.find((s) => s.id === this.currentSessionId);
   }
 
   sendMessage(): void {
-    if (!this.userInput.trim()) return;
+    if (!this.userInput.trim() || !this.currentSessionId) return;
+
+    const currentSession = this.getCurrentSession();
+    if (!currentSession) return;
 
     // Add user message
-    this.addMessage(this.userInput, true);
+    this.addMessage(currentSession, this.userInput, true);
     this.userInput = '';
 
     // Simulate loading state
@@ -299,25 +540,47 @@ export class ChatInterfaceComponent implements OnInit {
     // Simulate response (replace with actual API call)
     setTimeout(() => {
       this.addMessage(
+        currentSession,
         'This is a simulated response. Replace with actual API call.',
         false
       );
       this.isLoading = false;
       this.scrollToBottom();
+      this.saveSessions();
     }, 1000);
   }
 
-  clearChat(): void {
-    this.messages = [];
-    this.addMessage('Hello! How can I help you today?', false);
+  clearCurrentChat(): void {
+    const currentSession = this.getCurrentSession();
+    if (currentSession) {
+      currentSession.messages = [];
+      this.addMessage(
+        currentSession,
+        'Hello! How can I help you today?',
+        false
+      );
+      this.saveSessions();
+    }
   }
 
-  private addMessage(content: string, isUser: boolean): void {
-    this.messages.push({
+  private addMessage(
+    session: ChatSession,
+    content: string,
+    isUser: boolean
+  ): void {
+    const message: Message = {
       content,
       isUser,
       timestamp: new Date(),
-    });
+    };
+    session.messages.push(message);
+    session.lastMessageTime = new Date();
+
+    // Update session title based on first user message
+    if (isUser && session.title === 'New Chat') {
+      session.title =
+        content.length > 30 ? content.substring(0, 30) + '...' : content;
+    }
   }
 
   private scrollToBottom(): void {
@@ -327,5 +590,27 @@ export class ChatInterfaceComponent implements OnInit {
     } catch (err) {
       console.error('Error scrolling to bottom:', err);
     }
+  }
+
+  private generateId(): string {
+    return Math.random().toString(36).substring(2, 15);
+  }
+
+  private loadSessions(): void {
+    const savedSessions = localStorage.getItem('chatSessions');
+    if (savedSessions) {
+      this.chatSessions = JSON.parse(savedSessions).map((session: any) => ({
+        ...session,
+        lastMessageTime: new Date(session.lastMessageTime),
+        messages: session.messages.map((msg: any) => ({
+          ...msg,
+          timestamp: new Date(msg.timestamp),
+        })),
+      }));
+    }
+  }
+
+  private saveSessions(): void {
+    localStorage.setItem('chatSessions', JSON.stringify(this.chatSessions));
   }
 }
