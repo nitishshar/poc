@@ -565,6 +565,36 @@ interface Message {
       ::ng-deep .mat-mdc-form-field-icon-suffix:hover {
         color: var(--primary-color);
       }
+
+      .action-buttons {
+        .clear-chat-button,
+        .delete-chat-button {
+          color: var(--error-color);
+
+          &:hover {
+            color: var(--error-hover-color);
+          }
+
+          mat-icon {
+            color: inherit;
+          }
+        }
+      }
+
+      .header-actions {
+        .clear-chat-button,
+        .delete-chat-button {
+          color: var(--error-color);
+
+          &:hover {
+            color: var(--error-hover-color);
+          }
+
+          mat-icon {
+            color: inherit;
+          }
+        }
+      }
     `,
   ],
 })

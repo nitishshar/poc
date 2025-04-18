@@ -155,22 +155,54 @@ import {
       .table-content {
         width: 100%;
         overflow-x: auto;
-        background: rgba(255, 255, 255, 0.05);
-        border-radius: 4px;
+        background: var(--glass-card-background);
+        border-radius: var(--border-radius);
         margin: 8px 0;
+        border: var(--glass-border);
 
         table {
           width: 100%;
+          color: var(--text-color);
         }
 
         th {
           font-weight: 500;
           color: var(--text-color);
-          opacity: 0.9;
+          background: rgba(var(--primary-color-rgb), 0.1);
+          padding: 12px 16px;
         }
 
         td {
           color: var(--text-color);
+          padding: 12px 16px;
+        }
+
+        tr {
+          border-bottom: var(--glass-border);
+        }
+
+        tr:last-child {
+          border-bottom: none;
+        }
+
+        /* Override Material table styles */
+        ::ng-deep {
+          .mat-mdc-table {
+            background: transparent;
+          }
+
+          .mdc-data-table__row {
+            background: transparent;
+          }
+
+          .mdc-data-table__header-cell {
+            color: var(--text-color);
+            background: rgba(var(--primary-color-rgb), 0.1);
+          }
+
+          .mdc-data-table__cell {
+            color: var(--text-color);
+          }
         }
       }
 
@@ -206,13 +238,58 @@ import {
       }
 
       .graph-content {
-        width: 100%;
-        height: 300px;
+        width: 95%;
+        min-height: 300px;
+        height:350px;
         margin: 12px 0;
         position: relative;
-        background: rgba(255, 255, 255, 0.05);
-        border-radius: 8px;
+        background: var(--glass-card-background);
+        border: var(--glass-border);
+        border-radius: var(--border-radius);
         padding: 16px;
+
+        /* Override ngx-charts text colors */
+        ::ng-deep {
+          .ngx-charts {
+            text {
+              fill: var(--text-color) !important;
+            }
+
+            .legend-title,
+            .legend-label,
+            .grid-line-path {
+              color: var(--text-color) !important;
+              stroke: var(--text-color) !important;
+            }
+
+            .legend-labels {
+              background: var(--glass-card-background) !important;
+            }
+
+            .tick {
+              text {
+                fill: var(--text-color) !important;
+              }
+              line {
+                stroke: var(--text-color) !important;
+                opacity: 0.2;
+              }
+            }
+
+            .gridline-path {
+              stroke: var(--text-color) !important;
+              opacity: 0.1;
+            }
+
+            .line-series .line {
+              stroke-width: 2;
+            }
+
+            .tooltip-anchor {
+              fill: var(--text-color);
+            }
+          }
+        }
       }
 
       .html-content {
@@ -242,6 +319,16 @@ import {
         border-radius: 4px;
         color: var(--warning-color);
         font-size: 12px;
+      }
+
+      ::ng-deep {
+        .delete-icon {
+          color: var(--error-color) !important;
+        }
+
+        .mat-icon-button:hover .delete-icon {
+          color: var(--error-hover-color) !important;
+        }
       }
     `,
   ],
@@ -328,42 +415,44 @@ export class ContentTypeRendererComponent implements OnInit {
     if (this.content.type === 'graph') {
       const graphData = this.getGraphData();
 
-      // Transform the data to ngx-charts format
       if (graphData.type === 'pie') {
-        // For pie charts, we need name/value pairs
-        this.chartData = graphData.labels.map((label, index) => {
-          return {
-            name: label,
-            value: graphData.datasets[0].data[index],
-          };
-        });
+        this.chartData = graphData.labels.map((label, index) => ({
+          name: label,
+          value: graphData.datasets[0].data[index],
+        }));
+      } else if (graphData.type === 'bar') {
+        // Transform bar chart data
+        this.chartData = graphData.labels.map((label, index) => ({
+          name: label,
+          value: graphData.datasets[0].data[index],
+        }));
       } else {
-        // For line and bar charts, we need series data
-        this.chartData = graphData.datasets.map((dataset) => {
-          return {
-            name: dataset.label,
-            series: graphData.labels.map((label, index) => {
-              return {
-                name: label,
-                value: dataset.data[index],
-              };
-            }),
-          };
-        });
+        // For line charts
+        this.chartData = graphData.datasets.map((dataset) => ({
+          name: dataset.label,
+          series: graphData.labels.map((label, index) => ({
+            name: label,
+            value: dataset.data[index],
+          })),
+        }));
       }
 
-      // Set axis labels
+      // Set axis labels if provided or use defaults
       this.xAxisLabel = 'Category';
       this.yAxisLabel = 'Value';
 
-      // Set color scheme if provided
-      if (
-        graphData.datasets[0].backgroundColor &&
-        Array.isArray(graphData.datasets[0].backgroundColor)
-      ) {
-        this.colorScheme = {
-          domain: graphData.datasets[0].backgroundColor,
-        };
+      // Set color scheme
+      if (graphData.datasets[0].backgroundColor) {
+        if (Array.isArray(graphData.datasets[0].backgroundColor)) {
+          this.colorScheme = {
+            domain: graphData.datasets[0].backgroundColor,
+          };
+        } else {
+          // If single color provided, create a color scheme
+          this.colorScheme = {
+            domain: [graphData.datasets[0].backgroundColor],
+          };
+        }
       }
     }
   }
